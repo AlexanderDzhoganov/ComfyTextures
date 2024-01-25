@@ -1,0 +1,351 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "sd_xl_base_1.0_0.9vae.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "14": {
+    "inputs": {
+      "control_net_name": "diffusers_xl_depth_full.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "16": {
+    "inputs": {
+      "strength": 0.3,
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "30",
+        0
+      ],
+      "negative": [
+        "31",
+        0
+      ],
+      "control_net": [
+        "14",
+        0
+      ],
+      "image": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "control_depth"
+    }
+  },
+  "17": {
+    "inputs": {
+      "image": "depth_0.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "input_depth"
+    }
+  },
+  "25": {
+    "inputs": {
+      "strength": 0.3,
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "16",
+        0
+      ],
+      "negative": [
+        "16",
+        1
+      ],
+      "control_net": [
+        "26",
+        0
+      ],
+      "image": [
+        "108",
+        0
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "control_canny"
+    }
+  },
+  "26": {
+    "inputs": {
+      "control_net_name": "diffusers_xl_canny_full.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "30": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "apartment interior, rundown, post apocalyptic, abandoned, old, professional photography, hyperrealistic, octane render, unreal engine 5, path tracing, soft lighting, high quality, highly detailed, 8 k, complementary colors, cgsociety",
+      "text_l": "apartment interior, rundown, post apocalyptic, abandoned, old, professional photography, hyperrealistic, octane render, unreal engine 5, path tracing, soft lighting, high quality, highly detailed, 8 k, complementary colors, cgsociety",
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncodeSDXL",
+    "_meta": {
+      "title": "positive_prompt"
+    }
+  },
+  "31": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "drawing, painting, anime, blur, blurry, depth of field, bloom, fog, haze",
+      "text_l": "drawing, painting, anime, blur, blurry, depth of field, bloom, fog, haze",
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncodeSDXL",
+    "_meta": {
+      "title": "negative_prompt"
+    }
+  },
+  "33": {
+    "inputs": {
+      "image": "normals_0.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "input_normals"
+    }
+  },
+  "49": {
+    "inputs": {
+      "image": "style.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "input_style"
+    }
+  },
+  "89": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 44463302696484,
+      "steps": 25,
+      "cfg": 12,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "start_at_step": 15,
+      "end_at_step": 20,
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "25",
+        0
+      ],
+      "negative": [
+        "25",
+        1
+      ],
+      "latent_image": [
+        "114",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "sampler"
+    }
+  },
+  "91": {
+    "inputs": {
+      "tile_size": 512,
+      "samples": [
+        "110",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecodeTiled",
+    "_meta": {
+      "title": "VAE Decode (Tiled)"
+    }
+  },
+  "108": {
+    "inputs": {
+      "image": "edge_mask_0.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "input_edge"
+    }
+  },
+  "109": {
+    "inputs": {
+      "image": "color_0.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "input_color"
+    }
+  },
+  "110": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": 25,
+      "cfg": 12,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "start_at_step": 20,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "111",
+        0
+      ],
+      "positive": [
+        "112",
+        0
+      ],
+      "negative": [
+        "113",
+        0
+      ],
+      "latent_image": [
+        "89",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "sampler_refiner"
+    }
+  },
+  "111": {
+    "inputs": {
+      "ckpt_name": "sd_xl_refiner_1.0_0.9vae.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "112": {
+    "inputs": {
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "text": "apartment interior, rundown, post apocalyptic, abandoned, old, professional photography, hyperrealistic, octane render, unreal engine 5, path tracing, soft lighting, high quality, highly detailed, 8 k, complementary colors, cgsociety",
+      "clip": [
+        "111",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncodeSDXLRefiner",
+    "_meta": {
+      "title": "positive_prompt"
+    }
+  },
+  "113": {
+    "inputs": {
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "text": "drawing, painting, anime, blur, blurry, depth of field, bloom, fog, haze",
+      "clip": [
+        "111",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncodeSDXLRefiner",
+    "_meta": {
+      "title": "negative_prompt"
+    }
+  },
+  "114": {
+    "inputs": {
+      "pixels": [
+        "109",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "119": {
+    "inputs": {
+      "upscale_model": [
+        "120",
+        0
+      ],
+      "image": [
+        "91",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "120": {
+    "inputs": {
+      "model_name": "4x-UltraSharp.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "121": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}
