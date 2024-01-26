@@ -17,6 +17,8 @@ Unreal Engine 5.x is supported. Should work with 4.x with minor code changes.
 
 ## Watch the demo
 
+https://github.com/AlexanderDzhoganov/ComfyTextures/assets/855464/80596dea-e7d9-4fdc-b379-5f8eee11d94b
+
 https://github.com/AlexanderDzhoganov/ComfyTextures/assets/855464/6a674673-bbe4-42d1-a12b-f43edfc87640
 
 ## Comfy Textures Editor Widget
