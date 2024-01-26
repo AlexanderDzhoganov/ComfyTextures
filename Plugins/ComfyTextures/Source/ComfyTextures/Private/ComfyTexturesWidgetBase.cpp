@@ -69,13 +69,7 @@ void UComfyTexturesWidgetBase::Connect()
       UComfyTexturesWidgetBase* This = WeakThis.Get();
 
       UE_LOG(LogTemp, Warning, TEXT("Connected to ComfyUI"));
-
-      This->RequestData.Empty();
-      This->PromptIdToRequestIndex.Empty();
-      This->ActorSet.Empty();
-
-      This->State = EComfyTexturesState::Idle;
-      This->OnStateChanged(This->State);
+      This->TransitionToIdleState();
     });
 
   WebSocket->OnMessage().AddLambda([WeakThis](const FString& Message)
@@ -138,7 +132,7 @@ int UComfyTexturesWidgetBase::GetNumPendingRequests() const
 {
   int NumPendingRequests = 0;
 
-  for (const TPair<int, FComfyTexturesRenderData>& Pair : RequestData)
+  for (const TPair<int, FComfyTexturesRenderData>& Pair : RenderData)
   {
     if (Pair.Value.State == EComfyTexturesRenderState::Pending)
     {
@@ -156,7 +150,7 @@ bool UComfyTexturesWidgetBase::HasPendingRequests() const
 
 bool UComfyTexturesWidgetBase::ValidateAllRequestsSucceeded() const
 {
-  for (const TPair<int, FComfyTexturesRenderData>& Pair : RequestData)
+  for (const TPair<int, FComfyTexturesRenderData>& Pair : RenderData)
   {
     if (Pair.Value.State != EComfyTexturesRenderState::Finished)
     {
@@ -195,7 +189,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
   State = EComfyTexturesState::Rendering;
   OnStateChanged(State);
 
-  RequestData.Empty();
+  RenderData.Empty();
   PromptIdToRequestIndex.Empty();
   ActorSet = Actors;
 
@@ -207,8 +201,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
   if (!CreateCameraTransforms(Actors[0], CameraOpts, ViewInfos))
   {
     UE_LOG(LogTemp, Warning, TEXT("Failed to create camera transforms"));
-    State = EComfyTexturesState::Idle;
-    OnStateChanged(State);
+    TransitionToIdleState();
     return false;
   }
 
@@ -294,8 +287,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
   if (!CaptureSceneTextures(Actors[0]->GetWorld(), Actors, ViewInfos, RenderOpts.Mode, CaptureResults))
   {
     UE_LOG(LogTemp, Warning, TEXT("Failed to capture input textures"));
-    State = EComfyTexturesState::Idle;
-    OnStateChanged(State);
+    TransitionToIdleState();
     return false;
   }
 
@@ -325,8 +317,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
     if (!SaveImageToPng(CaptureResults[Index].Depth, FilePath))
     {
       UE_LOG(LogTemp, Warning, TEXT("Failed to save depth texture to %s"), *FilePath);
-      State = EComfyTexturesState::Idle;
-      OnStateChanged(State);
+      TransitionToIdleState();
       return false;
     }
 
@@ -339,8 +330,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
     if (!SaveImageToPng(CaptureResults[Index].Normals, FilePath))
     {
       UE_LOG(LogTemp, Warning, TEXT("Failed to save normals texture to %s"), *FilePath);
-      State = EComfyTexturesState::Idle;
-      OnStateChanged(State);
+      TransitionToIdleState();
       return false;
     }
 
@@ -352,8 +342,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
     if (!SaveImageToPng(CaptureResults[Index].Color, FilePath))
     {
       UE_LOG(LogTemp, Warning, TEXT("Failed to save color texture to %s"), *FilePath);
-      State = EComfyTexturesState::Idle;
-      OnStateChanged(State);
+      TransitionToIdleState();
       return false;
     }
 
@@ -365,8 +354,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
     if (!SaveImageToPng(CaptureResults[Index].EditMask, FilePath))
     {
       UE_LOG(LogTemp, Warning, TEXT("Failed to save mask texture to %s"), *FilePath);
-      State = EComfyTexturesState::Idle;
-      OnStateChanged(State);
+      TransitionToIdleState();
       return false;
     }
 
@@ -378,8 +366,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
     if (!SaveImageToPng(CaptureResults[Index].EdgeMask, FilePath))
     {
       UE_LOG(LogTemp, Warning, TEXT("Failed to save edge mask texture to %s"), *FilePath);
-      State = EComfyTexturesState::Idle;
-      OnStateChanged(State);
+      TransitionToIdleState();
       return false;
     }
 
@@ -389,13 +376,19 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
     if (!QueueRender(NewRenderOpts, RequestIndex))
     {
       UE_LOG(LogTemp, Warning, TEXT("Failed to queue render"));
-      State = EComfyTexturesState::Idle;
-      OnStateChanged(State);
+      TransitionToIdleState();
       return false;
     }
 
-    FComfyTexturesRenderData& Data = RequestData[RequestIndex];
+    FComfyTexturesRenderData& Data = RenderData[RequestIndex];
     Data.ViewInfo = ViewInfos[Index];
+
+    TOptional<FMatrix> CustomProjectionMatrix;
+    FMatrix ViewMatrix, ProjectionMatrix, ViewProjectionMatrix;
+    UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(Data.ViewInfo, CustomProjectionMatrix,
+      ViewMatrix, ProjectionMatrix, ViewProjectionMatrix);
+    Data.ViewMatrix = ViewMatrix;
+    Data.ProjectionMatrix = ProjectionMatrix;
     Data.RawDepth = CaptureResults[Index].RawDepth;
   }
 
@@ -761,7 +754,7 @@ bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTexturesRe
             int PixelY = FMath::FloorToInt(Uv.Y * (Data.RawDepth.Height - 1));
 
             float ClosestDepth = Data.RawDepth.Pixels[PixelX + PixelY * Data.RawDepth.Width].R;
-            
+
             if (ViewInfo.ProjectionMode == ECameraProjectionMode::Perspective)
             {
               FVector ViewSpacePoint = ViewMatrix.TransformPosition(WorldPosition);
@@ -829,83 +822,36 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
   if (!ValidateAllRequestsSucceeded())
   {
     UE_LOG(LogTemp, Warning, TEXT("Not all requests succeeded"));
-
-    RequestData.Empty();
-    PromptIdToRequestIndex.Empty();
-    ActorSet.Empty();
-
-    State = EComfyTexturesState::Idle;
-    OnStateChanged(State);
+    TransitionToIdleState();
     return false;
   }
 
-  if (RequestData.Num() == 0)
+  if (RenderData.Num() == 0)
   {
     UE_LOG(LogTemp, Warning, TEXT("No requests to process"));
-
-    State = EComfyTexturesState::Idle;
-    OnStateChanged(State);
+    TransitionToIdleState();
     return false;
   }
 
-  UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
-  FString ComfyOutputsDir = FPaths::Combine(Settings->ComfyDir.Path, "output");
-
-  // load all input images
-  TOptional<FMatrix> CustomProjectionMatrix;
-
-  for (TPair<int, FComfyTexturesRenderData>& Pair : RequestData)
+  if (!LoadRenderResultImages())
   {
-    FComfyTexturesRenderData& Data = Pair.Value;
-    FString FilePath = FPaths::Combine(ComfyOutputsDir, Data.OutputFileNames[0]);
-
-    TArray<FColor> Pixels;
-    int Width, Height;
-
-    if (!ReadPngPixels(FilePath, Pixels, Width, Height))
-    {
-      UE_LOG(LogTemp, Warning, TEXT("Failed to read PNG pixels"));
-
-      RequestData.Empty();
-      PromptIdToRequestIndex.Empty();
-      ActorSet.Empty();
-
-      State = EComfyTexturesState::Idle;
-      OnStateChanged(State);
-      return false;
-    }
-
-    Data.OutputPixels = Pixels;
-    Data.OutputWidth = Width;
-    Data.OutputHeight = Height;
-
-    FMatrix ViewMatrix, ProjectionMatrix, ViewProjectionMatrix;
-    UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(Data.ViewInfo, CustomProjectionMatrix,
-      ViewMatrix, ProjectionMatrix, ViewProjectionMatrix);
-    Data.ViewMatrix = ViewMatrix;
-    Data.ProjectionMatrix = ProjectionMatrix;
+    TransitionToIdleState();
+    return false;
   }
 
   if (UKismetSystemLibrary::BeginTransaction("ComfyTextures", FText::FromString("Comfy Textures Process Actors"), nullptr) != 0)
   {
     UE_LOG(LogTemp, Warning, TEXT("Failed to begin transaction"));
-
-    RequestData.Empty();
-    PromptIdToRequestIndex.Empty();
-    ActorSet.Empty();
-
-    State = EComfyTexturesState::Idle;
-    OnStateChanged(State);
+    TransitionToIdleState();
     return false;
   }
 
-  //GEditor->BeginTransaction(FText::FromString(TEXT("Comfy Textures Process Actors")));
   static TAtomic<int> PendingResults;
   PendingResults = 0;
 
   for (AActor* Actor : ActorSet)
   {
-    if (ProcessRenderResultForActor(Actor, RequestData, [&](bool bSuccess)
+    if (ProcessRenderResultForActor(Actor, RenderData, [&](bool bSuccess)
       {
         if (!bSuccess)
         {
@@ -915,18 +861,12 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
         PendingResults--;
         if (PendingResults == 0)
         {
-          //GEditor->EndTransaction();
           if (UKismetSystemLibrary::EndTransaction() != -1)
           {
             UE_LOG(LogTemp, Warning, TEXT("Failed to end transaction"));
           }
 
-          RequestData.Empty();
-          PromptIdToRequestIndex.Empty();
-          ActorSet.Empty();
-
-          State = EComfyTexturesState::Idle;
-          OnStateChanged(State);
+          TransitionToIdleState();
         }
 
         return true;
@@ -952,13 +892,7 @@ void UComfyTexturesWidgetBase::CancelJob()
 
   InterruptRender();
   ClearRenderQueue();
-
-  RequestData.Empty();
-  PromptIdToRequestIndex.Empty();
-  ActorSet.Empty();
-
-  State = EComfyTexturesState::Idle;
-  OnStateChanged(State);
+  TransitionToIdleState();
 }
 
 static TArray<TSharedPtr<FJsonObject>> FindNodesByTitle(const FJsonObject& Workflow, const FString& Title)
@@ -1191,7 +1125,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
   UE_LOG(LogTemp, Warning, TEXT("Sending render request: %s"), *RequestBodyString);
 
   RequestIndex = NextRequestIndex++;
-  RequestData.Add(RequestIndex, FComfyTexturesRenderData());
+  RenderData.Add(RequestIndex, FComfyTexturesRenderData());
 
   TWeakObjectPtr<UComfyTexturesWidgetBase> WeakThis(this);
 
@@ -1203,7 +1137,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
       }
 
       UComfyTexturesWidgetBase* This = WeakThis.Get();
-      FComfyTexturesRenderData& Data = This->RequestData[RequestIndex];
+      FComfyTexturesRenderData& Data = This->RenderData[RequestIndex];
 
       if (!bWasSuccessful)
       {
@@ -1426,23 +1360,19 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
 
     // create a new texture
 
-    FBox2D ScreenBounds;
-    if (!CalculateApproximateScreenBounds(Actor, PrepareOpts.ViewInfo, 1024, 1024, ScreenBounds))
+    FBox2D ActorScreenBounds;
+    if (!CalculateApproximateScreenBounds(Actor, PrepareOpts.ViewInfo, ActorScreenBounds))
     {
       UE_LOG(LogTemp, Error, TEXT("Failed to calculate screen bounds for actor %s."), *Actor->GetName());
       continue;
     }
 
-    FVector2D ScreenSize;
-    ScreenSize.X = ScreenBounds.Max.X - ScreenBounds.Min.X;
-    ScreenSize.Y = ScreenBounds.Max.Y - ScreenBounds.Min.Y;
-
-    float LargerSize = FMath::Max(ScreenSize.X, ScreenSize.Y);
-    UE_LOG(LogTemp, Warning, TEXT("Larger size: %f for actor %s."), LargerSize, *Actor->GetName());
+    FVector2D SizeOnScreen = ActorScreenBounds.GetSize();
+    float LargerSize = FMath::Max(SizeOnScreen.X, SizeOnScreen.Y);
 
     // get next power of two
-    LargerSize *= Settings->TextureQualityMultiplier;
-    int TextureSize = FMath::Clamp(LargerSize, Settings->MinTextureSize, Settings->MaxTextureSize);
+    int TextureSize = FMath::Lerp((float)Settings->MinTextureSize, (float)Settings->MaxTextureSize, LargerSize);
+    TextureSize = (float)TextureSize * Settings->TextureQualityMultiplier;
     TextureSize = FMath::RoundUpToPowerOfTwo(TextureSize);
 
     UE_LOG(LogTemp, Warning, TEXT("Chosen texture size: %d for actor %s."), TextureSize, *Actor->GetName());
@@ -1666,13 +1596,13 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const FString& Message)
   }
 
   int RequestIndex = PromptIdToRequestIndex[PromptId];
-  if (!RequestData.Contains(RequestIndex))
+  if (!RenderData.Contains(RequestIndex))
   {
     UE_LOG(LogTemp, Warning, TEXT("Received websocket message for unknown request index: %d"), RequestIndex);
     return;
   }
 
-  FComfyTexturesRenderData& Data = RequestData[RequestIndex];
+  FComfyTexturesRenderData& Data = RenderData[RequestIndex];
 
   if (MessageType == "execution_start")
   {
@@ -2118,7 +2048,7 @@ bool UComfyTexturesWidgetBase::GenerateMipMaps(UTexture2D* Texture) const
 }
 
 // calculate the approximate screen bounds of an actor using the actor bounds and the camera view info
-bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, const FMinimalViewInfo& ViewInfo, int Width, int Height, FBox2D& OutBounds) const
+bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, const FMinimalViewInfo& ViewInfo, FBox2D& OutBounds) const
 {
   if (Actor == nullptr)
   {
@@ -2126,25 +2056,11 @@ bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, c
     return false;
   }
 
-  // get the actor bounds
   FBox ActorBounds = Actor->GetComponentsBoundingBox();
-
-  // get the actor center
   FVector ActorCenter = ActorBounds.GetCenter();
-
-  // get the actor extent
   FVector ActorExtent = ActorBounds.GetExtent();
-
-  // get the actor transform
   FTransform ActorTransform = Actor->GetTransform();
 
-  TOptional<FMatrix> CustomProjectionMatrix;
-  FMatrix ViewMatrix;
-  FMatrix ProjectionMatrix;
-  FMatrix ViewProjectionMatrix;
-  UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(ViewInfo, CustomProjectionMatrix, ViewMatrix, ProjectionMatrix, ViewProjectionMatrix);
-
-  // project all corners of the actor bounds onto the screen
   FVector Corners[8];
   Corners[0] = ActorTransform.TransformPosition(ActorCenter + FVector(ActorExtent.X, ActorExtent.Y, ActorExtent.Z));
   Corners[1] = ActorTransform.TransformPosition(ActorCenter + FVector(ActorExtent.X, ActorExtent.Y, -ActorExtent.Z));
@@ -2155,9 +2071,15 @@ bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, c
   Corners[6] = ActorTransform.TransformPosition(ActorCenter + FVector(-ActorExtent.X, -ActorExtent.Y, ActorExtent.Z));
   Corners[7] = ActorTransform.TransformPosition(ActorCenter + FVector(-ActorExtent.X, -ActorExtent.Y, -ActorExtent.Z));
 
+  TOptional<FMatrix> CustomProjectionMatrix;
+  FMatrix ViewMatrix;
+  FMatrix ProjectionMatrix;
+  FMatrix ViewProjectionMatrix;
+  UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(ViewInfo, CustomProjectionMatrix,
+    ViewMatrix, ProjectionMatrix, ViewProjectionMatrix);
+
   // project the corners onto the screen
   FVector2D ScreenCorners[8];
-
   for (int CornerIndex = 0; CornerIndex < 8; CornerIndex++)
   {
     FVector4 HomogeneousPosition = ViewProjectionMatrix.TransformFVector4(FVector4(Corners[CornerIndex], 1.0f));
@@ -2165,7 +2087,6 @@ bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, c
   }
 
   // find the min and max screen coordinates
-
   float MinX = FLT_MAX;
   float MinY = FLT_MAX;
   float MaxX = -FLT_MAX;
@@ -2180,24 +2101,19 @@ bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, c
   }
 
   // clamp the screen coordinates to the screen bounds
-
   MinX = FMath::Clamp(MinX, -1.0f, 1.0f);
   MinY = FMath::Clamp(MinY, -1.0f, 1.0f);
   MaxX = FMath::Clamp(MaxX, -1.0f, 1.0f);
   MaxY = FMath::Clamp(MaxY, -1.0f, 1.0f);
 
-  // convert screen coordinates to pixel coordinates
+  FVector2D Min = FVector2D(MinX, MinY);
+  FVector2D Max = FVector2D(MaxX, MaxY);
 
-  float PixelMinX = ((MinX + 1.0f) / 2.0f) * Width;
-  float PixelMinY = ((MinY + 1.0f) / 2.0f) * Height;
-
-  float PixelMaxX = ((MaxX + 1.0f) / 2.0f) * Width;
-  float PixelMaxY = ((MaxY + 1.0f) / 2.0f) * Height;
-
-  // create a bounding box from the pixel coordinates
-
-  OutBounds = FBox2D(FVector2D(PixelMinX, PixelMinY), FVector2D(PixelMaxX, PixelMaxY));
-
+  // convert from [-1, 1] to [0, 1]
+  Min = Min * 0.5f + FVector2D(0.5f, 0.5f);
+  Max = Max * 0.5f + FVector2D(0.5f, 0.5f);
+  
+  OutBounds = FBox2D(Min, Max);
   return true;
 }
 
@@ -2381,8 +2297,10 @@ float UComfyTexturesWidgetBase::ComputeDepthGradient(const FComfyTexturesImageDa
   float GradY = 0.0f;
 
   // Apply the Sobel operator
-  for (int I = -1; I <= 1; I++) {
-    for (int J = -1; J <= 1; J++) {
+  for (int I = -1; I <= 1; I++)
+  {
+    for (int J = -1; J <= 1; J++)
+    {
       int PixelX = FMath::Clamp(X + I, 0, Image.Width - 1);
       int PixelY = FMath::Clamp(Y + J, 0, Image.Height - 1);
 
@@ -2406,20 +2324,23 @@ float UComfyTexturesWidgetBase::ComputeNormalsGradient(const FComfyTexturesImage
   FVector GradY(0.0f, 0.0f, 0.0f);
 
   // Apply the Sobel operator
-  for (int I = -1; I <= 1; I++) {
-    for (int J = -1; J <= 1; J++) {
+  for (int I = -1; I <= 1; I++)
+  {
+    for (int J = -1; J <= 1; J++)
+    {
       int PixelX = FMath::Clamp(X + I, 0, Image.Width - 1);
       int PixelY = FMath::Clamp(Y + J, 0, Image.Height - 1);
 
-      FVector Normal = FVector(
-        Image.Pixels[PixelY * Image.Width + PixelX].R, // Assuming normal's X component is in the red channel
-        Image.Pixels[PixelY * Image.Width + PixelX].G, // Assuming normal's Y component is in the green channel
-        Image.Pixels[PixelY * Image.Width + PixelX].B  // Assuming normal's Z component is in the blue channel
+      FVector Normal = FVector
+      (
+        Image.Pixels[PixelY * Image.Width + PixelX].R,
+        Image.Pixels[PixelY * Image.Width + PixelX].G,
+        Image.Pixels[PixelY * Image.Width + PixelX].B
       );
 
-      Normal -= FVector(0.5f, 0.5f, 0.5f); // Center the normal around 0
-      Normal *= 2.0f; // Scale the normal to be in the range [-1, 1]
-      Normal = Normal.GetSafeNormal(); // Normalize the normal
+      Normal -= FVector(0.5f, 0.5f, 0.5f);
+      Normal *= 2.0f;
+      Normal = Normal.GetSafeNormal();
 
       GradX += Normal * SobelX[I + 1][J + 1];
       GradY += Normal * SobelY[I + 1][J + 1];
@@ -2429,6 +2350,44 @@ float UComfyTexturesWidgetBase::ComputeNormalsGradient(const FComfyTexturesImage
   // Calculate the gradient magnitude
   FVector Gradient = GradX + GradY;
   return Gradient.Size();
+}
+
+bool UComfyTexturesWidgetBase::LoadRenderResultImages()
+{
+  UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
+  FString ComfyOutputsDir = FPaths::Combine(Settings->ComfyDir.Path, "output");
+
+  TOptional<FMatrix> CustomProjectionMatrix;
+  for (TPair<int, FComfyTexturesRenderData>& Pair : RenderData)
+  {
+    FComfyTexturesRenderData& Data = Pair.Value;
+    FString FilePath = FPaths::Combine(ComfyOutputsDir, Data.OutputFileNames[0]);
+
+    TArray<FColor> Pixels;
+    int Width, Height;
+
+    if (!ReadPngPixels(FilePath, Pixels, Width, Height))
+    {
+      UE_LOG(LogTemp, Warning, TEXT("Failed to read PNG pixels"));
+      return false;
+    }
+
+    Data.OutputPixels = Pixels;
+    Data.OutputWidth = Width;
+    Data.OutputHeight = Height;
+  }
+
+  return true;
+}
+
+void UComfyTexturesWidgetBase::TransitionToIdleState()
+{
+  RenderData.Empty();
+  PromptIdToRequestIndex.Empty();
+  ActorSet.Empty();
+
+  State = EComfyTexturesState::Idle;
+  OnStateChanged(State);
 }
 
 bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComfyTexturesCameraOptions& CameraOptions, TArray<FMinimalViewInfo>& OutViewInfos) const
@@ -2444,11 +2403,10 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
   if (CameraOptions.CameraMode == EComfyTexturesCameraMode::EditorCamera)
   {
     // get current editor viewport camera transform
-    FViewportClient* ViewportClient = GEditor->GetActiveViewport()->GetClient();
-    FEditorViewportClient* EditorViewportClient = (FEditorViewportClient*)ViewportClient;
+    FEditorViewportClient* EditorViewportClient = (FEditorViewportClient*)GEditor->GetActiveViewport()->GetClient();
 
     // get the camera transform
-    FViewportCameraTransform CameraTransform = EditorViewportClient->GetViewTransform();
+    const FViewportCameraTransform& CameraTransform = EditorViewportClient->GetViewTransform();
 
     // create a minimal view info from the camera transform
     FMinimalViewInfo ViewInfo;
