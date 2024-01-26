@@ -458,7 +458,7 @@ static void ExpandTextureIslands(TArray<FColor>& Pixels, int Width, int Height, 
   }
 }
 
-static void RasterizeTriangle(FVector2D V0, FVector2D V1, FVector2D V2, int Width, int Height, TFunction<void(const FVector2D&)> Callback)
+static void RasterizeTriangle(FVector2D V0, FVector2D V1, FVector2D V2, int Width, int Height, TFunction<void(int, int, const FVector&)> Callback)
 {
   FVector2D Size(Width - 1, Height - 1);
   V0 *= Size;
@@ -477,29 +477,17 @@ static void RasterizeTriangle(FVector2D V0, FVector2D V1, FVector2D V2, int Widt
       return (C.X - A.X) * (B.Y - A.Y) - (C.Y - A.Y) * (B.X - A.X);
     };
 
-  // Precalculate half-edge constants
-  float C0 = Edge(V0, V1, V2);
-  float C1 = Edge(V1, V2, V0);
-  float C2 = Edge(V2, V0, V1);
-
-  // Check for degenerate triangle
-  if (C0 == 0 || C1 == 0 || C2 == 0)
+  for (int Y = MinY; Y <= MaxY; Y++)
   {
-    return;
-  }
-
-  // Rasterize
-  FVector2D P;
-  for (P.Y = MinY; P.Y <= MaxY; P.Y++)
-  {
-    for (P.X = MinX; P.X <= MaxX; P.X++)
+    for (int X = MinX; X <= MaxX; X++)
     {
-      // Check if point p is inside the triangle
-      float Eps = 0.1f;
-      // if (Edge(V0, V1, P) >= -Eps && Edge(V1, V2, P) >= -Eps && Edge(V2, V0, P) >= -Eps)
+      FVector Barycentric = FMath::GetBaryCentric2D(FVector2D(X, Y), V0, V1, V2);
+      if (Barycentric.X < 0 || Barycentric.Y < 0 || Barycentric.Z < 0)
       {
-        Callback(P);
+        continue;
       }
+
+      Callback(X, Y, Barycentric);
     }
   }
 }
@@ -649,17 +637,15 @@ bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTexturesRe
         const FVector2D& Uv1 = Uvs[Index1];
         const FVector2D& Uv2 = Uvs[Index2];
 
-        RasterizeTriangle(Uv0, Uv1, Uv2, TextureWidth, TextureHeight, [&](const FVector2D& TriUv)
+        RasterizeTriangle(Uv0, Uv1, Uv2, TextureWidth, TextureHeight, [&](int X, int Y, const FVector& Barycentric)
           {
-            int PixelIndex = FMath::FloorToInt(TriUv.X) + FMath::FloorToInt(TriUv.Y) * TextureWidth;
+            int PixelIndex = X + Y * TextureWidth;
             if (PixelIndex < 0 || PixelIndex >= Pixels.Num())
             {
               return;
             }
 
             // find the local position of the pixel
-            FVector2D PixelCoords = TriUv / FVector2D(TextureWidth - 1, TextureHeight - 1);
-            FVector Barycentric = FMath::GetBaryCentric2D(PixelCoords, Uv0, Uv1, Uv2);
             FVector LocalPosition = Barycentric.X * Vertex0 + Barycentric.Y * Vertex1 + Barycentric.Z * Vertex2;
             FVector WorldPosition = ActorTransform.TransformPosition(LocalPosition);
 
