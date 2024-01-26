@@ -1558,11 +1558,11 @@ void UComfyTexturesWidgetBase::HandleRenderStateChanged(const FComfyTexturesRend
 FString UComfyTexturesWidgetBase::GetBaseUrl() const
 {
   UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
-  FString BaseUrl;
+  FString BaseUrl = Settings->ComfyUrl;
 
-  if (!Settings->ComfyUrl.StartsWith("http://") && !Settings->ComfyUrl.StartsWith("https://"))
+  if (!BaseUrl.StartsWith("http://") && !BaseUrl.StartsWith("https://"))
   {
-    BaseUrl = "http://" + Settings->ComfyUrl;
+    BaseUrl = "http://" + BaseUrl;
   }
 
   // strip trailing slash
