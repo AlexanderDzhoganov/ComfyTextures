@@ -41,8 +41,8 @@ The models directory is relative to the ComfyUI root directory i.e. `<ComfyUI Ro
 
 - `models/checkpoints/sd_xl_base_1.0_0.9vae.safetensors` - [Download](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0_0.9vae.safetensors)
 - `models/checkpoints/sd_xl_refiner_1.0_0.9vae.safetensors` - [Download](https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/blob/main/sd_xl_refiner_1.0_0.9vae.safetensors)
-- `models/controlnet/control-lora-canny-rank256.safetensors` - [Download](https://huggingface.co/stabilityai/control-lora/blob/main/control-LoRAs-rank256/control-lora-canny-rank256.safetensors)
-- `models/controlnet/control-lora-depth-rank256.safetensors` - [Download](https://huggingface.co/stabilityai/control-lora/blob/main/control-LoRAs-rank256/control-lora-depth-rank256.safetensors)
+- `models/controlnet/diffusers_xl_canny_full.safetensors` - [Download](https://huggingface.co/lllyasviel/sd_control_collection/blob/main/diffusers_xl_canny_full.safetensors)
+- `models/controlnet/diffusers_xl_depth_full.safetensors` - [Download](https://huggingface.co/lllyasviel/sd_control_collection/blob/main/diffusers_xl_depth_full.safetensors)
 - `models/loras/lcm_lora_sdxl.safetensors` - [Download](https://huggingface.co/latent-consistency/lcm-lora-sdxl/blob/main/pytorch_lora_weights.safetensors) (Note: Rename the file to `lcm_lora_sdxl.safetensors`)
 - `models/upscale_models/4x-UltraSharp.pth` - [Download](https://huggingface.co/lokCX/4x-Ultrasharp/blob/main/4x-UltraSharp.pth)
 
