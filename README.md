@@ -11,6 +11,7 @@ Features:
 - [x] Orthographic camera
 - [x] Inpainting
 - [x] Image to image
+- [x] Remote ComfyUI instance support
 
 Unreal Engine 5.x is supported. Should work with 4.x with minor code changes.
 
@@ -51,7 +52,7 @@ The models directory is relative to the ComfyUI root directory i.e. `<ComfyUI Ro
 
 2. Configure the plugin by going to `Project Settings -> Plugins -> Comfy Textures`.
 
-Make sure to set `Comfy Dir` to the ComfyUI directory i.e. `<ComfyUI Root>/ComfyUI/`.
+If you are running ComfyUI on a remote machine, you need to set the `Comfy Url` to the correct address.
 
 3. Open the plugin window by clicking on `Tools -> Editor Utility Widgets -> Comfy Textures Widget`.
 

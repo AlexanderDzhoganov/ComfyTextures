@@ -69,10 +69,7 @@ class UComfyTexturesSettings : public UObject
 
   public:
   UPROPERTY(EditAnywhere, config, Category = "General")
-  FString ComfyUrl = "127.0.0.1:8188";
-
-  UPROPERTY(EditAnywhere, config, Category = "General")
-  FDirectoryPath ComfyDir;
+  FString ComfyUrl = "http://127.0.0.1:8188";
 
   UPROPERTY(EditAnywhere, config, Category = "General")
   int MinTextureSize = 64;
@@ -358,11 +355,17 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   private:
   void HandleRenderStateChanged(const FComfyTexturesRenderData& Data);
 
+  FString GetBaseUrl() const;
+
   void HandleWebSocketMessage(const FString& Message);
 
-  bool DoHttpGetRequest(const FString& Url, TFunction<void(const FString&, bool)> Callback) const;
+  bool DoHttpGetRequest(const FString& Url, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
 
-  bool DoHttpPostRequest(const FString& Url, const FString& Content, TFunction<void(const FString&, bool)> Callback) const;
+  bool DoHttpGetRequestRaw(const FString& Url, TFunction<void(const TArray<uint8>&, bool)> Callback) const;
+
+  bool DoHttpPostRequest(const FString& Url, const FString& Content, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
+
+  bool DoHttpFileUpload(const FString& Url, const TArray<uint8>& FileData, const FString& FileName, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
 
   bool CreateCameraTransforms(AActor* Actor, const FComfyTexturesCameraOptions& CameraOptions, TArray<FMinimalViewInfo>& OutViewInfos) const;
 
@@ -370,9 +373,13 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
 
   bool ReadRenderTargetPixels(UTextureRenderTarget2D* InputTexture, EComfyTexturesRenderTextureMode Mode, FComfyTexturesImageData& OutImage) const;
 
-  bool SaveImageToPng(const FComfyTexturesImageData& Image, FString FilePath) const;
+  bool SaveImageToPng(const FComfyTexturesImageData& Image, const FString& FilePath) const;
 
-  bool SaveTexture2DToPng(UTexture2D* Texture, FString FilePath) const;
+  bool ConvertImageToPng(const FComfyTexturesImageData& Image, TArray<uint8>& OutBytes) const;
+
+  bool UploadImages(const TArray<FComfyTexturesImageData>& Images, const TArray<FString>& FileNames, TFunction<void(const TArray<FString>&, bool)> Callback) const;
+
+  bool DownloadImage(const FString& FileName, TFunction<void(TArray<FColor>, int, int, bool)> Callback) const;
 
   bool ReadPngPixels(FString FilePath, TArray<FColor>& OutPixels, int& OutWidth, int& OutHeight) const;
 
@@ -392,7 +399,7 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
 
   float ComputeNormalsGradient(const FComfyTexturesImageData& Image, int X, int Y) const;
 
-  bool LoadRenderResultImages();
+  void LoadRenderResultImages(TFunction<void(bool)> Callback);
 
   void TransitionToIdleState();
 };
