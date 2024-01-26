@@ -206,7 +206,7 @@ bool ComfyTexturesHttpClient::DoHttpPostRequest(const FString& Url, const FStrin
   return HttpRequest->ProcessRequest();
 }
 
-bool ComfyTexturesHttpClient::DoHttpFileUpload(const FString& Url, const TArray<uint8>& FileData, const FString& FileName, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const
+bool ComfyTexturesHttpClient::DoHttpFileUpload(const FString& Url, const TArray64<uint8>& FileData, const FString& FileName, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const
 {
   UE_LOG(LogTemp, Warning, TEXT("Uploading file to %s"), *Url);
 

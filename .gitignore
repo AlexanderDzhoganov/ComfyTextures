@@ -54,6 +54,7 @@ Session.vim
 
 Plugins/ComfyTextures/Intermediate/**
 Plugins/ComfyTextures/Binaries/**
+Plugins/ComfyTextures/WidgetParams.json
 
 !README.md
 !LICENSE

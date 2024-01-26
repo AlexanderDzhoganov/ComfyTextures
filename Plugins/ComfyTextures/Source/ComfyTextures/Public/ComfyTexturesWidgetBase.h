@@ -85,7 +85,6 @@ struct FComfyTexturesImageData
 {
   GENERATED_BODY()
 
-  public:
   UPROPERTY(BlueprintReadOnly)
   TArray<FLinearColor> Pixels;
 
@@ -101,7 +100,6 @@ struct FComfyTexturesRenderData
 {
   GENERATED_BODY()
 
-  public:
   UPROPERTY(BlueprintReadOnly)
   FString PromptId;
 
@@ -137,7 +135,6 @@ struct FComfyTexturesWorkflowParams
 {
   GENERATED_BODY()
 
-  public:
   UPROPERTY(BlueprintReadWrite)
   FString PositivePrompt;
 
@@ -145,7 +142,7 @@ struct FComfyTexturesWorkflowParams
   FString NegativePrompt;
 
   UPROPERTY(BlueprintReadWrite)
-  int Seed;
+  int Seed = 0;
 
   UPROPERTY(BlueprintReadWrite)
   float Cfg;
@@ -164,6 +161,9 @@ struct FComfyTexturesWorkflowParams
 
   UPROPERTY(BlueprintReadWrite)
   float ControlCannyStrength;
+
+  UPROPERTY(BlueprintReadWrite)
+  EComfyTexturesEditMaskMode EditMaskMode;
 };
 
 USTRUCT(BlueprintType)
@@ -171,18 +171,26 @@ struct FComfyTexturesRenderOptions
 {
   GENERATED_BODY()
 
-  public:
   UPROPERTY(BlueprintReadWrite)
   EComfyTexturesMode Mode;
 
   UPROPERTY(BlueprintReadWrite)
-  FString WorkflowJsonPath;
-
-  UPROPERTY(BlueprintReadWrite)
-  EComfyTexturesEditMaskMode EditMaskMode;
-
-  UPROPERTY(BlueprintReadWrite)
   FComfyTexturesWorkflowParams Params;
+
+  UPROPERTY(BlueprintReadWrite)
+  EComfyTexturesCameraMode CameraMode;
+
+  UPROPERTY(BlueprintReadWrite)
+  ACameraActor* ExistingCamera;
+
+  UPROPERTY(BlueprintReadWrite)
+  int OrbitSteps;
+
+  UPROPERTY(BlueprintReadWrite)
+  float OrbitHeight;
+
+  UPROPERTY(BlueprintReadWrite)
+  float CameraFov;
 
   FString DepthImageFilename;
 
@@ -200,7 +208,6 @@ struct FComfyTexturesCaptureOutput
 {
   GENERATED_BODY()
 
-  public:
   UPROPERTY(BlueprintReadOnly)
   FComfyTexturesImageData RawDepth;
 
@@ -221,33 +228,10 @@ struct FComfyTexturesCaptureOutput
 };
 
 USTRUCT(BlueprintType)
-struct FComfyTexturesCameraOptions
-{
-  GENERATED_BODY()
-
-  public:
-  UPROPERTY(BlueprintReadWrite)
-  EComfyTexturesCameraMode CameraMode;
-
-  UPROPERTY(BlueprintReadWrite)
-  ACameraActor* ExistingCamera;
-
-  UPROPERTY(BlueprintReadWrite)
-  int OrbitSteps;
-
-  UPROPERTY(BlueprintReadWrite)
-  float OrbitHeight;
-
-  UPROPERTY(BlueprintReadWrite)
-  float CameraFov;
-};
-
-USTRUCT(BlueprintType)
 struct FComfyTexturesPrepareOptions
 {
   GENERATED_BODY()
 
-  public:
   UPROPERTY(BlueprintReadWrite)
   UMaterial* BaseMaterial;
 
@@ -267,14 +251,14 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   GENERATED_BODY()
 
   public:
+  UPROPERTY(BlueprintReadOnly, Category = "ComfyTextures")
+  EComfyTexturesState State = EComfyTexturesState::Disconnected;
+
   UFUNCTION(BlueprintImplementableEvent, Category = "ComfyTextures")
   void OnStateChanged(EComfyTexturesState NewState);
 
   UFUNCTION(BlueprintImplementableEvent, Category = "ComfyTextures")
   void OnRenderStateChanged(const FString& PromptId, const FComfyTexturesRenderData& Data);
-
-  UPROPERTY(BlueprintReadOnly, Category = "ComfyTextures")
-  EComfyTexturesState State = EComfyTexturesState::Disconnected;
 
   UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
   void Connect();
@@ -292,7 +276,7 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   bool ValidateAllRequestsSucceeded() const;
 
   UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
-  bool ProcessMultipleActors(const TArray<AActor*>& Actors, const FComfyTexturesRenderOptions& RenderOpts, const FComfyTexturesCameraOptions& CameraOpts);
+  bool ProcessMultipleActors(const TArray<AActor*>& Actors, const FComfyTexturesRenderOptions& RenderOpts);
 
   UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
   bool ProcessRenderResults();
@@ -330,6 +314,18 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
   void GetFlattenedSelectionSetWithChildren(TArray<AActor*>& OutActors) const;
 
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  bool LoadParams();
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  bool SaveParams();
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  void SetParams(EComfyTexturesMode Mode, const FComfyTexturesWorkflowParams& InParams);
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  void GetParams(EComfyTexturesMode Mode, FComfyTexturesWorkflowParams& OutParams) const;
+
   protected:
   TUniquePtr<ComfyTexturesHttpClient> HttpClient;
 
@@ -345,6 +341,9 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   // actors that are currently being processed
   TArray<AActor*> ActorSet;
 
+  // user-selected workflow parameters for each mode
+  TMap<EComfyTexturesMode, FComfyTexturesWorkflowParams> Params;
+
   private:
   FString GetBaseUrl() const;
 
@@ -352,13 +351,13 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
 
   void HandleWebSocketMessage(const TSharedPtr<FJsonObject>& Message);
 
-  bool CreateCameraTransforms(AActor* Actor, const FComfyTexturesCameraOptions& CameraOptions, TArray<FMinimalViewInfo>& OutViewInfos) const;
+  bool CreateCameraTransforms(AActor* Actor, const FComfyTexturesRenderOptions& RenderOpts, TArray<FMinimalViewInfo>& OutViewInfos) const;
 
   bool CaptureSceneTextures(UWorld* World, TArray<AActor*> Actors, const TArray<FMinimalViewInfo>& ViewInfos, EComfyTexturesMode Mode, TArray<FComfyTexturesCaptureOutput>& Outputs) const;
 
   bool ReadRenderTargetPixels(UTextureRenderTarget2D* InputTexture, EComfyTexturesRenderTextureMode Mode, FComfyTexturesImageData& OutImage) const;
 
-  bool ConvertImageToPng(const FComfyTexturesImageData& Image, TArray<uint8>& OutBytes) const;
+  bool ConvertImageToPng(const FComfyTexturesImageData& Image, TArray64<uint8>& OutBytes) const;
 
   bool UploadImages(const TArray<FComfyTexturesImageData>& Images, const TArray<FString>& FileNames, TFunction<void(const TArray<FString>&, bool)> Callback) const;
 

@@ -115,7 +115,7 @@ bool UComfyTexturesWidgetBase::ValidateAllRequestsSucceeded() const
   return true;
 }
 
-bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Actors, const FComfyTexturesRenderOptions& RenderOpts, const FComfyTexturesCameraOptions& CameraOpts)
+bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Actors, const FComfyTexturesRenderOptions& RenderOpts)
 {
   if (!IsConnected())
   {
@@ -143,7 +143,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
   ActorSet = Actors;
 
   TArray<FMinimalViewInfo> ViewInfos;
-  if (!CreateCameraTransforms(Actors[0], CameraOpts, ViewInfos))
+  if (!CreateCameraTransforms(Actors[0], RenderOpts, ViewInfos))
   {
     UE_LOG(LogTemp, Warning, TEXT("Failed to create camera transforms"));
     TransitionToIdleState();
@@ -153,7 +153,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
   UTexture2D* MagentaPixel = nullptr;
   TMap<AActor*, TPair<UMaterialInstanceDynamic*, UTexture*>> ActorToTextureMap;
 
-  if (RenderOpts.Mode == EComfyTexturesMode::Edit && RenderOpts.EditMaskMode == EComfyTexturesEditMaskMode::FromObject)
+  if (RenderOpts.Mode == EComfyTexturesMode::Edit && RenderOpts.Params.EditMaskMode == EComfyTexturesEditMaskMode::FromObject)
   {
     MagentaPixel = UTexture2D::CreateTransient(1, 1, PF_B8G8R8A8);
 
@@ -492,7 +492,7 @@ static void RasterizeTriangle(FVector2D V0, FVector2D V1, FVector2D V2, int Widt
   }
 }
 
-bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTexturesRenderData>& RenderData, TFunction<void(bool)> Callback)
+static bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTexturesRenderData>& RenderData, TFunction<void(bool)> Callback)
 {
   const FTransform& ActorTransform = Actor->GetActorTransform();
 
@@ -981,16 +981,17 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
     return false;
   }
 
-  if (!FPaths::FileExists(RenderOpts.WorkflowJsonPath))
+  FString WorkflowJsonPath = GetWorkflowJsonPath(RenderOpts.Mode);
+  if (!FPaths::FileExists(WorkflowJsonPath))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Workflow JSON file does not exist: %s"), *RenderOpts.WorkflowJsonPath);
+    UE_LOG(LogTemp, Warning, TEXT("Workflow JSON file does not exist: %s"), *WorkflowJsonPath);
     return false;
   }
 
   FString JsonString = "";
-  if (!FFileHelper::LoadFileToString(JsonString, *RenderOpts.WorkflowJsonPath))
+  if (!FFileHelper::LoadFileToString(JsonString, *WorkflowJsonPath))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to load workflow JSON file: %s"), *RenderOpts.WorkflowJsonPath);
+    UE_LOG(LogTemp, Warning, TEXT("Failed to load workflow JSON file: %s"), *WorkflowJsonPath);
     return false;
   }
 
@@ -1471,6 +1472,156 @@ void UComfyTexturesWidgetBase::GetFlattenedSelectionSetWithChildren(TArray<AActo
   OutActors.Append(UniqueOutActors.Array());
 }
 
+bool UComfyTexturesWidgetBase::LoadParams()
+{
+  Params.Empty();
+
+  // setup default params from workflow json
+
+  for (int i = 0; i <= (int)EComfyTexturesMode::Refine; i++)
+  {
+    EComfyTexturesMode Mode = (EComfyTexturesMode)i;
+    FString JsonPath = GetWorkflowJsonPath(Mode);
+
+    FComfyTexturesWorkflowParams Param;
+    Param.EditMaskMode = EComfyTexturesEditMaskMode::FromObject;
+    if (!ParseWorkflowJson(JsonPath, Param))
+    {
+      UE_LOG(LogTemp, Warning, TEXT("Failed to parse workflow JSON"));
+      return false;
+    }
+
+    Params.Add(Mode, Param);
+  }
+
+  FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
+  FString ConfigPath = FPaths::Combine(PluginFolderPath, TEXT("WidgetParams.json"));
+
+  FString JsonString = "";
+
+  if (!FFileHelper::LoadFileToString(JsonString, *ConfigPath))
+  {
+    UE_LOG(LogTemp, Warning, TEXT("Failed to load widget params JSON file: %s"), *ConfigPath);
+    return false;
+  }
+
+  TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+
+  TSharedPtr<FJsonObject> ParamsObject;
+  if (!FJsonSerializer::Deserialize(Reader, ParamsObject))
+  {
+    UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize widget params JSON"));
+    return false;
+  }
+
+  for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : ParamsObject->Values)
+  {
+    TSharedPtr<FJsonObject> ParamObject = Pair.Value->AsObject();
+
+    FComfyTexturesWorkflowParams Param;
+    ParamObject->TryGetStringField("positive_prompt", Param.PositivePrompt);
+    ParamObject->TryGetStringField("negative_prompt", Param.NegativePrompt);
+    ParamObject->TryGetNumberField("seed", Param.Seed);
+    ParamObject->TryGetNumberField("cfg", Param.Cfg);
+    ParamObject->TryGetNumberField("steps", Param.Steps);
+    ParamObject->TryGetNumberField("refiner_steps", Param.RefinerSteps);
+    ParamObject->TryGetNumberField("denoise_strength", Param.DenoiseStrength);
+    ParamObject->TryGetNumberField("control_depth_strength", Param.ControlDepthStrength);
+    ParamObject->TryGetNumberField("control_canny_strength", Param.ControlCannyStrength);
+
+    float editMaskMode = 0.0f;
+    if (ParamObject->TryGetNumberField("edit_mask_mode", editMaskMode))
+    {
+      Param.EditMaskMode = (EComfyTexturesEditMaskMode)editMaskMode;
+    }
+
+    if (Pair.Key == "create")
+    {
+      Params.Add(EComfyTexturesMode::Create, Param);
+    }
+    else if (Pair.Key == "edit")
+    {
+      Params.Add(EComfyTexturesMode::Edit, Param);
+    }
+    else if (Pair.Key == "refine")
+    {
+      Params.Add(EComfyTexturesMode::Refine, Param);
+    }
+    else
+    {
+      UE_LOG(LogTemp, Warning, TEXT("Invalid mode"));
+    }
+  }
+
+  return true;
+}
+
+bool UComfyTexturesWidgetBase::SaveParams()
+{
+  FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
+  FString ConfigPath = FPaths::Combine(PluginFolderPath, TEXT("WidgetParams.json"));
+
+  TSharedPtr<FJsonObject> ParamsObject = MakeShareable(new FJsonObject);
+
+  for (const TPair<EComfyTexturesMode, FComfyTexturesWorkflowParams>& Pair : Params)
+  {
+    TSharedPtr<FJsonObject> ParamObject = MakeShareable(new FJsonObject);
+
+    ParamObject->SetStringField("positive_prompt", Pair.Value.PositivePrompt);
+    ParamObject->SetStringField("negative_prompt", Pair.Value.NegativePrompt);
+    ParamObject->SetNumberField("seed", Pair.Value.Seed);
+    ParamObject->SetNumberField("cfg", Pair.Value.Cfg);
+    ParamObject->SetNumberField("steps", Pair.Value.Steps);
+    ParamObject->SetNumberField("refiner_steps", Pair.Value.RefinerSteps);
+    ParamObject->SetNumberField("denoise_strength", Pair.Value.DenoiseStrength);
+    ParamObject->SetNumberField("control_depth_strength", Pair.Value.ControlDepthStrength);
+    ParamObject->SetNumberField("control_canny_strength", Pair.Value.ControlCannyStrength);
+    ParamObject->SetNumberField("edit_mask_mode", (float)Pair.Value.EditMaskMode);
+
+    FString ModeString = "";
+    if (Pair.Key == EComfyTexturesMode::Create)
+    {
+      ModeString = "create";
+    }
+    else if (Pair.Key == EComfyTexturesMode::Edit)
+    {
+      ModeString = "edit";
+    }
+    else if (Pair.Key == EComfyTexturesMode::Refine)
+    {
+      ModeString = "refine";
+    }
+    else
+    {
+      UE_LOG(LogTemp, Warning, TEXT("Invalid mode"));
+    }
+
+    ParamsObject->SetObjectField(ModeString, ParamObject);
+  }
+
+  FString JsonString;
+  TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
+  FJsonSerializer::Serialize(ParamsObject.ToSharedRef(), Writer);
+
+  return FFileHelper::SaveStringToFile(JsonString, *ConfigPath);
+}
+
+void UComfyTexturesWidgetBase::SetParams(EComfyTexturesMode Mode, const FComfyTexturesWorkflowParams& InParams)
+{
+  Params[Mode] = InParams;
+}
+
+void UComfyTexturesWidgetBase::GetParams(EComfyTexturesMode Mode, FComfyTexturesWorkflowParams& OutParams) const
+{
+  if (!Params.Contains(Mode))
+  {
+    UE_LOG(LogTemp, Warning, TEXT("Params does not contain mode %d"), (int)Mode);
+    return;
+  }
+
+  OutParams = Params[Mode];
+}
+
 void UComfyTexturesWidgetBase::HandleRenderStateChanged(const FComfyTexturesRenderData& Data)
 {
   OnRenderStateChanged(Data.PromptId, Data);
@@ -1740,7 +1891,7 @@ bool UComfyTexturesWidgetBase::ReadRenderTargetPixels(UTextureRenderTarget2D* In
   return true;
 }
 
-bool UComfyTexturesWidgetBase::ConvertImageToPng(const FComfyTexturesImageData& Image, TArray<uint8>& OutBytes) const
+bool UComfyTexturesWidgetBase::ConvertImageToPng(const FComfyTexturesImageData& Image, TArray64<uint8>& OutBytes) const
 {
   UE_LOG(LogTemp, Warning, TEXT("Converting image to PNG with Width: %d, Height: %d"), Image.Width, Image.Height);
 
@@ -1762,7 +1913,7 @@ bool UComfyTexturesWidgetBase::ConvertImageToPng(const FComfyTexturesImageData& 
     Image8[Index] = OutPixel;
   }
 
-  FImageUtils::CompressImageArray(Image.Width, Image.Height, Image8, OutBytes);
+  FImageUtils::PNGCompressImageArray(Image.Width, Image.Height, Image8, OutBytes);
   return true;
 }
 
@@ -1790,7 +1941,7 @@ bool UComfyTexturesWidgetBase::UploadImages(const TArray<FComfyTexturesImageData
   {
     Async(EAsyncExecution::ThreadPool, [this, Image = Images[Index], FileName = FileNames[Index], StateData, Index, Callback]()
       {
-        TArray<uint8> PngData;
+        TArray64<uint8> PngData;
         if (!ConvertImageToPng(Image, PngData))
         {
           StateData->bAllSuccessful = false;
@@ -2331,7 +2482,7 @@ void UComfyTexturesWidgetBase::TransitionToIdleState()
   OnStateChanged(State);
 }
 
-bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComfyTexturesCameraOptions& CameraOptions, TArray<FMinimalViewInfo>& OutViewInfos) const
+bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComfyTexturesRenderOptions& RenderOpts, TArray<FMinimalViewInfo>& OutViewInfos) const
 {
   if (Actor == nullptr)
   {
@@ -2341,7 +2492,7 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
 
   OutViewInfos.Empty();
 
-  if (CameraOptions.CameraMode == EComfyTexturesCameraMode::EditorCamera)
+  if (RenderOpts.CameraMode == EComfyTexturesCameraMode::EditorCamera)
   {
     // get current editor viewport camera transform
     FEditorViewportClient* EditorViewportClient = (FEditorViewportClient*)GEditor->GetActiveViewport()->GetClient();
@@ -2361,9 +2512,9 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
 
     OutViewInfos.Add(ViewInfo);
   }
-  else if (CameraOptions.CameraMode == EComfyTexturesCameraMode::ExistingCamera)
+  else if (RenderOpts.CameraMode == EComfyTexturesCameraMode::ExistingCamera)
   {
-    if (CameraOptions.ExistingCamera == nullptr)
+    if (RenderOpts.ExistingCamera == nullptr)
     {
       UE_LOG(LogTemp, Error, TEXT("Existing camera is null."));
       return false;
@@ -2371,7 +2522,7 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
 
     // get camera component from camera actor
 
-    UCameraComponent* CameraComponent = CameraOptions.ExistingCamera->FindComponentByClass<UCameraComponent>();
+    UCameraComponent* CameraComponent = RenderOpts.ExistingCamera->FindComponentByClass<UCameraComponent>();
     if (CameraComponent == nullptr)
     {
       UE_LOG(LogTemp, Error, TEXT("Camera component not found."));
@@ -2383,7 +2534,7 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
 
     OutViewInfos.Add(ViewInfo);
   }
-  else if (CameraOptions.CameraMode == EComfyTexturesCameraMode::EightSides)
+  else if (RenderOpts.CameraMode == EComfyTexturesCameraMode::EightSides)
   {
     // get the actor bounds
     FBox ActorBounds = Actor->GetComponentsBoundingBox();
@@ -2441,7 +2592,7 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
     BottomTransform.SetRotation(FQuat::MakeFromEuler(FVector(0.0f, 90.0f, 0.0f)));
     OutCameraTransforms.Add(BottomTransform);*/
   }
-  else if (CameraOptions.CameraMode == EComfyTexturesCameraMode::Orbit)
+  else if (RenderOpts.CameraMode == EComfyTexturesCameraMode::Orbit)
   {
     // get the actor bounds
     FBox ActorBounds = Actor->GetComponentsBoundingBox();
@@ -2461,12 +2612,12 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
     float GreatestExtent = FMath::Max(ActorExtent.X, FMath::Max(ActorExtent.Y, ActorExtent.Z));
     float Distance = GreatestExtent / FMath::Tan(CameraFov * (float)PI / 360.0f);
 
-    for (int Index = 0; Index < CameraOptions.OrbitSteps; Index++)
+    for (int Index = 0; Index < RenderOpts.OrbitSteps; Index++)
     {
-      float Angle = Index * 360.0f / CameraOptions.OrbitSteps;
+      float Angle = Index * 360.0f / RenderOpts.OrbitSteps;
       float X = FMath::Cos(Angle * (float)PI / 180.0f);
       float Y = FMath::Sin(Angle * (float)PI / 180.0f);
-      float Z = CameraOptions.OrbitHeight;
+      float Z = RenderOpts.OrbitHeight;
 
       /*FTransform Transform;
       Transform.SetLocation(ActorCenter + FVector(X * Distance, Y * Distance, Z));
