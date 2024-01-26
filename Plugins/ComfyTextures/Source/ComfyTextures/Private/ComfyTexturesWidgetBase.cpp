@@ -7,9 +7,6 @@
 #include "Camera/CameraComponent.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Serialization/JsonSerializer.h"
-#include "WebSocketsModule.h"
-#include "HttpModule.h"
-#include "Http.h"
 #include "Editor.h"
 #include "EditorViewportClient.h"
 #include "EditorAssetLibrary.h"
@@ -23,57 +20,16 @@
 
 #define LOCTEXT_NAMESPACE "ComfyTextures"
 
-bool UComfyTexturesWidgetBase::Initialize()
-{
-  if (!Super::Initialize())
-  {
-    return false;
-  }
-
-  ClientId = FGuid::NewGuid().ToString();
-
-  return true;
-}
-
 void UComfyTexturesWidgetBase::Connect()
 {
-  if (WebSocket.IsValid())
+  if (!HttpClient.IsValid())
   {
-    if (WebSocket->IsConnected())
-    {
-      UE_LOG(LogTemp, Warning, TEXT("Closing existing connection"));
-      WebSocket->Close();
-    }
+    HttpClient = MakeUnique<ComfyTexturesHttpClient>(GetBaseUrl());
   }
-
-  State = EComfyTexturesState::Reconnecting;
-
-  if (!FModuleManager::Get().IsModuleLoaded("WebSockets"))
-  {
-    FModuleManager::Get().LoadModule("WebSockets");
-    UE_LOG(LogTemp, Warning, TEXT("Loaded WebSockets module"));
-  }
-  UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
-
-  FString BaseUrl = GetBaseUrl();
-  FString Proto = "ws://";
-
-  if (BaseUrl.StartsWith("http://"))
-  {
-    BaseUrl = BaseUrl.RightChop(7);
-  }
-  else if (Settings->ComfyUrl.StartsWith("https://"))
-  {
-    BaseUrl = BaseUrl.RightChop(8);
-    Proto = "wss://";
-  }
-
-  FString WsUrl = Proto + BaseUrl + "/ws?clientId=" + ClientId;
-  WebSocket = FWebSocketsModule::Get().CreateWebSocket(WsUrl, TEXT("ws"));
 
   TWeakObjectPtr<UComfyTexturesWidgetBase> WeakThis(this);
 
-  WebSocket->OnConnected().AddLambda([WeakThis]()
+  HttpClient->SetWebSocketStateChangedCallback([WeakThis](bool bConnected)
     {
       if (!WeakThis.IsValid())
       {
@@ -82,64 +38,43 @@ void UComfyTexturesWidgetBase::Connect()
 
       UComfyTexturesWidgetBase* This = WeakThis.Get();
 
-      UE_LOG(LogTemp, Warning, TEXT("Connected to ComfyUI"));
-      This->TransitionToIdleState();
+      if (bConnected)
+      {
+        This->TransitionToIdleState();
+      }
+      else
+      {
+        This->State = EComfyTexturesState::Disconnected;
+        This->OnStateChanged(This->State);
+      }
     });
 
-  WebSocket->OnMessage().AddLambda([WeakThis](const FString& Message)
+  HttpClient->SetWebSocketMessageCallback([WeakThis](const TSharedPtr<FJsonObject>& Message)
     {
       if (!WeakThis.IsValid())
       {
         return;
       }
 
-      UE_LOG(LogTemp, Warning, TEXT("Message received from ComfyUI: %s"), *Message);
-
       UComfyTexturesWidgetBase* This = WeakThis.Get();
+
       This->HandleWebSocketMessage(Message);
     });
 
-  WebSocket->OnConnectionError().AddLambda([WeakThis](const FString& Error)
-    {
-      if (!WeakThis.IsValid())
-      {
-        return;
-      }
+  HttpClient->Connect();
 
-      UE_LOG(LogTemp, Warning, TEXT("Error connecting to ComfyUI: %s"), *Error);
-
-      UComfyTexturesWidgetBase* This = WeakThis.Get();
-      This->State = EComfyTexturesState::Disconnected;
-      This->OnStateChanged(This->State);
-    });
-
-  WebSocket->OnClosed().AddLambda([WeakThis](int32 StatusCode, const FString& Reason, bool bWasClean)
-    {
-      if (!WeakThis.IsValid())
-      {
-        return;
-      }
-
-      UE_LOG(LogTemp, Warning, TEXT("Connection to ComfyUI closed: %s"), *Reason);
-
-      UComfyTexturesWidgetBase* This = WeakThis.Get();
-      This->State = EComfyTexturesState::Disconnected;
-      This->OnStateChanged(This->State);
-    });
-
-  UE_LOG(LogTemp, Warning, TEXT("Connecting to ComfyUI at %s"), *WsUrl);
-
-  WebSocket->Connect();
+  State = EComfyTexturesState::Reconnecting;
+  OnStateChanged(State);
 }
 
 bool UComfyTexturesWidgetBase::IsConnected() const
 {
-  if (!WebSocket.IsValid())
+  if (!HttpClient.IsValid())
   {
     return false;
   }
 
-  return WebSocket->IsConnected();
+  return HttpClient->IsConnected();
 }
 
 int UComfyTexturesWidgetBase::GetNumPendingRequests() const
@@ -1121,7 +1056,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
   SetNodeInputProperty(*Workflow, "input_edge", "image", RenderOpts.EdgeMaskImageFilename);
 
   TSharedPtr<FJsonObject> RequestBody = MakeShareable(new FJsonObject);
-  RequestBody->SetStringField("client_id", ClientId);
+  RequestBody->SetStringField("client_id", HttpClient->ClientId);
   RequestBody->SetObjectField("prompt", Workflow);
 
   FString RequestBodyString;
@@ -1135,7 +1070,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
 
   TWeakObjectPtr<UComfyTexturesWidgetBase> WeakThis(this);
 
-  return DoHttpPostRequest("prompt", RequestBodyString, [WeakThis, RequestIndex](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+  return HttpClient->DoHttpPostRequest("prompt", RequestBodyString, [WeakThis, RequestIndex](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!WeakThis.IsValid())
       {
@@ -1188,7 +1123,7 @@ void UComfyTexturesWidgetBase::InterruptRender() const
 
   UE_LOG(LogTemp, Warning, TEXT("Sending interrupt request: %s"), *RequestBodyString);
 
-  DoHttpPostRequest("interrupt", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+  HttpClient->DoHttpPostRequest("interrupt", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
@@ -1217,7 +1152,7 @@ void UComfyTexturesWidgetBase::ClearRenderQueue()
 
   UE_LOG(LogTemp, Warning, TEXT("Sending clear request: %s"), *RequestBodyString);
 
-  DoHttpPostRequest("queue", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+  HttpClient->DoHttpPostRequest("queue", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
@@ -1251,7 +1186,7 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
 
     UE_LOG(LogTemp, Warning, TEXT("Sending free memory request: %s"), *RequestBodyString);
 
-    DoHttpPostRequest("free", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+    HttpClient->DoHttpPostRequest("free", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
       {
         if (!bWasSuccessful)
         {
@@ -1272,7 +1207,7 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
 
   UE_LOG(LogTemp, Warning, TEXT("Sending history clear request: %s"), *RequestBodyString);
 
-  DoHttpPostRequest("history", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+  HttpClient->DoHttpPostRequest("history", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
@@ -1575,26 +1510,17 @@ FString UComfyTexturesWidgetBase::GetBaseUrl() const
   return BaseUrl;
 }
 
-void UComfyTexturesWidgetBase::HandleWebSocketMessage(const FString& Message)
+void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObject>& Message)
 {
-  TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Message);
-  TSharedPtr<FJsonObject> Response;
-
-  if (!FJsonSerializer::Deserialize(Reader, Response))
-  {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize websocket message JSON"));
-    return;
-  }
-
   FString MessageType;
-  if (!Response->TryGetStringField("type", MessageType))
+  if (!Message->TryGetStringField("type", MessageType))
   {
     UE_LOG(LogTemp, Warning, TEXT("Websocket message missing type field"));
     return;
   }
 
   const TSharedPtr<FJsonObject>* MessageData;
-  if (!Response->TryGetObjectField("data", MessageData))
+  if (!Message->TryGetObjectField("data", MessageData))
   {
     UE_LOG(LogTemp, Warning, TEXT("Websocket message missing data field"));
     return;
@@ -1728,167 +1654,6 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const FString& Message)
   }
 }
 
-bool UComfyTexturesWidgetBase::DoHttpGetRequest(const FString& Url, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const
-{
-  TSharedRef<IHttpRequest> HttpRequest = FHttpModule::Get().CreateRequest();
-  HttpRequest->SetVerb("GET");
-  HttpRequest->SetURL(GetBaseUrl() + "/" + Url);
-  HttpRequest->OnProcessRequestComplete()
-    .BindLambda([Callback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
-      {
-        if (!bWasSuccessful || !Response.IsValid())
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to receive valid response"));
-          Callback(nullptr, false);
-          return;
-        }
-
-        FString ResponseString = Response->GetContentAsString();
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
-        TSharedPtr<FJsonObject> ResponseJson;
-
-        if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogTemp, Warning, TEXT("%s"), *ResponseString);
-          Callback(nullptr, false);
-          return;
-        }
-
-        Callback(ResponseJson, true);
-      });
-
-  return HttpRequest->ProcessRequest();
-}
-
-bool UComfyTexturesWidgetBase::DoHttpGetRequestRaw(const FString& Url, TFunction<void(const TArray<uint8>&, bool)> Callback) const
-{
-  TSharedRef<IHttpRequest> HttpRequest = FHttpModule::Get().CreateRequest();
-  HttpRequest->SetVerb("GET");
-  HttpRequest->SetURL(GetBaseUrl() + "/" + Url);
-  HttpRequest->OnProcessRequestComplete()
-    .BindLambda([Callback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
-      {
-        if (!bWasSuccessful || !Response.IsValid())
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to receive valid response"));
-          Callback(TArray<uint8>(), false);
-          return;
-        }
-
-        Callback(Response->GetContent(), true);
-      });
-
-  return HttpRequest->ProcessRequest();
-}
-
-bool UComfyTexturesWidgetBase::DoHttpPostRequest(const FString& Url, const FString& Content, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const
-{
-  TSharedRef<IHttpRequest> HttpRequest = FHttpModule::Get().CreateRequest();
-  HttpRequest->SetVerb("POST");
-  HttpRequest->SetURL(GetBaseUrl() + "/" + Url);
-  HttpRequest->SetHeader("Content-Type", "application/json");
-  HttpRequest->SetContentAsString(Content);
-
-  HttpRequest->OnProcessRequestComplete()
-    .BindLambda([Callback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
-      {
-        if (!bWasSuccessful || !Response.IsValid())
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to receive valid response"));
-          Callback(nullptr, false);
-          return;
-        }
-
-        FString ResponseString = Response->GetContentAsString();
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
-        TSharedPtr<FJsonObject> ResponseJson;
-
-        if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogTemp, Warning, TEXT("%s"), *ResponseString);
-          Callback(nullptr, false);
-          return;
-        }
-
-        Callback(ResponseJson, true);
-      });
-
-  return HttpRequest->ProcessRequest();
-}
-
-bool UComfyTexturesWidgetBase::DoHttpFileUpload(const FString& Url, const TArray<uint8>& FileData, const FString& FileName, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const
-{
-  UE_LOG(LogTemp, Warning, TEXT("Uploading file to %s"), *Url);
-
-  TSharedRef<IHttpRequest> HttpRequest = FHttpModule::Get().CreateRequest();
-  HttpRequest->SetVerb("POST");
-  HttpRequest->SetURL(GetBaseUrl() + "/" + Url);
-
-  // do an http post with the file in the image field
-
-  HttpRequest->SetHeader("Content-Type", "multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW");
-
-  TArray<uint8> Content;
-
-  // http form data wtf
-
-  FString Boundary = "------WebKitFormBoundary7MA4YWxkTrZu0gW";
-  Content.Append((uint8*)TCHAR_TO_ANSI(*Boundary), Boundary.Len());
-  Content.Append((uint8*)"\r\n", 2);
-
-  // add overwite=1 to the form data
-
-  FString Overwrite = "Content-Disposition: form-data; name=\"overwrite\"\r\n\r\n1\r\n";
-  Content.Append((uint8*)TCHAR_TO_ANSI(*Overwrite), Overwrite.Len());
-  Content.Append((uint8*)TCHAR_TO_ANSI(*Boundary), Boundary.Len());
-  Content.Append((uint8*)"\r\n", 2);
-
-  // add the file to the form data
-
-  FString ContentDisposition = "Content-Disposition: form-data; name=\"image\"; filename=\"" + FileName + "\"";
-  Content.Append((uint8*)TCHAR_TO_ANSI(*ContentDisposition), ContentDisposition.Len());
-  Content.Append((uint8*)"\r\n", 2);
-  FString ContentType = "Content-Type: image/png";
-  Content.Append((uint8*)TCHAR_TO_ANSI(*ContentType), ContentType.Len());
-  Content.Append((uint8*)"\r\n", 2);
-  Content.Append((uint8*)"\r\n", 2);
-  Content.Append(FileData.GetData(), FileData.Num());
-  Content.Append((uint8*)"\r\n", 2);
-  Content.Append((uint8*)TCHAR_TO_ANSI(*Boundary), Boundary.Len());
-  Content.Append((uint8*)"--", 2);
-
-  HttpRequest->SetContent(Content);
-
-  HttpRequest->OnProcessRequestComplete()
-    .BindLambda([Callback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
-      {
-        if (!bWasSuccessful || !Response.IsValid())
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to receive valid response"));
-          Callback(nullptr, false);
-          return;
-        }
-
-        FString ResponseString = Response->GetContentAsString();
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
-        TSharedPtr<FJsonObject> ResponseJson;
-
-        if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogTemp, Warning, TEXT("%s"), *ResponseString);
-          Callback(nullptr, false);
-          return;
-        }
-
-        Callback(ResponseJson, true);
-      });
-
-  return HttpRequest->ProcessRequest();
-}
-
 bool UComfyTexturesWidgetBase::ReadRenderTargetPixels(UTextureRenderTarget2D* InputTexture, EComfyTexturesRenderTextureMode Mode, FComfyTexturesImageData& OutImage) const
 {
   if (InputTexture == nullptr)
@@ -1989,33 +1754,6 @@ bool UComfyTexturesWidgetBase::ReadRenderTargetPixels(UTextureRenderTarget2D* In
   return true;
 }
 
-bool UComfyTexturesWidgetBase::SaveImageToPng(const FComfyTexturesImageData& Image, const FString& FilePath) const
-{
-  UE_LOG(LogTemp, Warning, TEXT("Saving PNG with Width: %d, Height: %d to %s"), Image.Width, Image.Height, *FilePath);
-
-  TArray<FColor> Image8;
-  Image8.SetNum(Image.Pixels.Num());
-  for (int Index = 0; Index < Image.Pixels.Num(); Index++)
-  {
-    FLinearColor Pixel = Image.Pixels[Index];
-    // convert from linear to sRGB
-    Pixel.R = FMath::Pow(Pixel.R, 1.0f / 2.2f);
-    Pixel.G = FMath::Pow(Pixel.G, 1.0f / 2.2f);
-    Pixel.B = FMath::Pow(Pixel.B, 1.0f / 2.2f);
-
-    FColor OutPixel;
-    OutPixel.R = FMath::Clamp(Pixel.R, 0.0f, 1.0f) * 255.0f;
-    OutPixel.G = FMath::Clamp(Pixel.G, 0.0f, 1.0f) * 255.0f;
-    OutPixel.B = FMath::Clamp(Pixel.B, 0.0f, 1.0f) * 255.0f;
-    OutPixel.A = FMath::Clamp(Pixel.A, 0.0f, 1.0f) * 255.0f;
-    Image8[Index] = OutPixel;
-  }
-
-  TArray64<uint8> PngData;
-  FImageUtils::PNGCompressImageArray(Image.Width, Image.Height, Image8, PngData);
-  return FFileHelper::SaveArrayToFile(PngData, *FilePath);
-}
-
 bool UComfyTexturesWidgetBase::ConvertImageToPng(const FComfyTexturesImageData& Image, TArray<uint8>& OutBytes) const
 {
   UE_LOG(LogTemp, Warning, TEXT("Converting image to PNG with Width: %d, Height: %d"), Image.Width, Image.Height);
@@ -2077,7 +1815,7 @@ bool UComfyTexturesWidgetBase::UploadImages(const TArray<FComfyTexturesImageData
           return;
         }
 
-        DoHttpFileUpload("upload/image", PngData, FileName, [StateData, Index, Callback](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+        HttpClient->DoHttpFileUpload("upload/image", PngData, FileName, [StateData, Index, Callback](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
           {
             if (!bWasSuccessful)
             {
@@ -2114,7 +1852,7 @@ bool UComfyTexturesWidgetBase::DownloadImage(const FString& FileName, TFunction<
 {
   FString Url = "view?filename=" + FileName;
 
-  return DoHttpGetRequestRaw(Url, [Callback](const TArray<uint8>& PngData, bool bWasSuccessful)
+  return HttpClient->DoHttpGetRequestRaw(Url, [Callback](const TArray<uint8>& PngData, bool bWasSuccessful)
     {
       TArray<FColor> Pixels;
 
@@ -2167,51 +1905,6 @@ bool UComfyTexturesWidgetBase::DownloadImage(const FString& FileName, TFunction<
 
       Callback(Pixels, Width, Height, true);
     });
-}
-
-bool UComfyTexturesWidgetBase::ReadPngPixels(FString FilePath, TArray<FColor>& OutPixels, int& OutWidth, int& OutHeight) const
-{
-  TArray64<uint8> PngData;
-  if (!FFileHelper::LoadFileToArray(PngData, *FilePath))
-  {
-    return false;
-  }
-
-  // Create an image wrapper using the PNG format
-  IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
-  TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
-
-  // Set the compressed data for the image wrapper
-  if (ImageWrapper.IsValid() && ImageWrapper->SetCompressed(PngData.GetData(), PngData.Num()))
-  {
-    // Decompress the image data
-    TArray<uint8> RawData;
-    if (ImageWrapper->GetRaw(ERGBFormat::BGRA, 8, RawData))
-    {
-      OutWidth = ImageWrapper->GetWidth();
-      OutHeight = ImageWrapper->GetHeight();
-
-      // Ensure the OutPixels array is empty and has enough space
-      OutPixels.Empty();
-      OutPixels.SetNum(OutWidth * OutHeight);
-
-      // Copy the decompressed pixel data
-      const uint8* PixelData = RawData.GetData();
-      for (int32 PixelIndex = 0; PixelIndex < OutPixels.Num(); ++PixelIndex)
-      {
-        int32 Index = PixelIndex * 4; // 4 bytes per pixel (BGRA)
-        FColor& Pixel = OutPixels[PixelIndex];
-        Pixel.B = PixelData[Index];
-        Pixel.G = PixelData[Index + 1];
-        Pixel.R = PixelData[Index + 2];
-        Pixel.A = PixelData[Index + 3];
-      }
-
-      return true;
-    }
-  }
-
-  return false;
 }
 
 bool UComfyTexturesWidgetBase::GenerateMipMaps(UTexture2D* Texture) const

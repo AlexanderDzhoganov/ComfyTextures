@@ -3,11 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Templates/SharedPointer.h"
 #include "Engine/TextureRenderTarget2D.h"
-#include "IWebSocket.h"
 #include "EditorUtilityWidget.h"
 #include "Camera/CameraActor.h"
+#include "ComfyTexturesHttpClient.h"
 #include "ComfyTexturesWidgetBase.generated.h"
 
 UENUM(BlueprintType)
@@ -277,11 +276,6 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   UPROPERTY(BlueprintReadOnly, Category = "ComfyTextures")
   EComfyTexturesState State = EComfyTexturesState::Disconnected;
 
-  UPROPERTY(BlueprintReadOnly, Category = "ComfyTextures")
-  FString ClientId;
-
-  virtual bool Initialize() override;
-
   UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
   void Connect();
 
@@ -337,8 +331,7 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   void GetFlattenedSelectionSetWithChildren(TArray<AActor*>& OutActors) const;
 
   protected:
-  // comfyui websocket connection
-  TSharedPtr<IWebSocket> WebSocket;
+  TUniquePtr<ComfyTexturesHttpClient> HttpClient;
 
   // data for all render requests
   TMap<int, FComfyTexturesRenderData> RenderData;
@@ -353,19 +346,11 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   TArray<AActor*> ActorSet;
 
   private:
-  void HandleRenderStateChanged(const FComfyTexturesRenderData& Data);
-
   FString GetBaseUrl() const;
 
-  void HandleWebSocketMessage(const FString& Message);
+  void HandleRenderStateChanged(const FComfyTexturesRenderData& Data);
 
-  bool DoHttpGetRequest(const FString& Url, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
-
-  bool DoHttpGetRequestRaw(const FString& Url, TFunction<void(const TArray<uint8>&, bool)> Callback) const;
-
-  bool DoHttpPostRequest(const FString& Url, const FString& Content, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
-
-  bool DoHttpFileUpload(const FString& Url, const TArray<uint8>& FileData, const FString& FileName, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
+  void HandleWebSocketMessage(const TSharedPtr<FJsonObject>& Message);
 
   bool CreateCameraTransforms(AActor* Actor, const FComfyTexturesCameraOptions& CameraOptions, TArray<FMinimalViewInfo>& OutViewInfos) const;
 
@@ -373,15 +358,11 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
 
   bool ReadRenderTargetPixels(UTextureRenderTarget2D* InputTexture, EComfyTexturesRenderTextureMode Mode, FComfyTexturesImageData& OutImage) const;
 
-  bool SaveImageToPng(const FComfyTexturesImageData& Image, const FString& FilePath) const;
-
   bool ConvertImageToPng(const FComfyTexturesImageData& Image, TArray<uint8>& OutBytes) const;
 
   bool UploadImages(const TArray<FComfyTexturesImageData>& Images, const TArray<FString>& FileNames, TFunction<void(const TArray<FString>&, bool)> Callback) const;
 
   bool DownloadImage(const FString& FileName, TFunction<void(TArray<FColor>, int, int, bool)> Callback) const;
-
-  bool ReadPngPixels(FString FilePath, TArray<FColor>& OutPixels, int& OutWidth, int& OutHeight) const;
 
   bool GenerateMipMaps(UTexture2D* Texture) const;
 
