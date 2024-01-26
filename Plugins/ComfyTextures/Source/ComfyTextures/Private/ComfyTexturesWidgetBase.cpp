@@ -1368,6 +1368,9 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
     // get next power of two
     int TextureSize = FMath::Lerp((float)Settings->MinTextureSize, (float)Settings->MaxTextureSize, LargerSize);
     TextureSize = (float)TextureSize * Settings->TextureQualityMultiplier;
+
+    // clamp to max texture size
+    TextureSize = FMath::Clamp(TextureSize, Settings->MinTextureSize, Settings->MaxTextureSize);
     TextureSize = FMath::RoundUpToPowerOfTwo(TextureSize);
 
     UE_LOG(LogTemp, Warning, TEXT("Chosen texture size: %d for actor %s."), TextureSize, *Actor->GetName());
