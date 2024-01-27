@@ -52,13 +52,19 @@ The models directory is relative to the ComfyUI root directory i.e. `<ComfyUI Ro
 
 ### Setup Unreal Engine project
 
-1. Clone this repository and open the project (`MyProject.uproject`) in the Unreal Engine editor.
+1. Clone this repository.
 
-2. Configure the plugin by going to `Project Settings -> Plugins -> Comfy Textures`.
+2. Build the Unreal project by right clicking on `MyProject.uproject` and selecting `Generate Visual Studio project files`.
+
+    This will generate a `MyProject.sln` file in the project directory. Open the file in Visual Studio and build the project by pressing `F7`. If you are encountering errors, make sure Visual Studio is correctly configured for Unreal Engine by following [this guide](https://docs.unrealengine.com/5.3/en-US/setting-up-visual-studio-development-environment-for-cplusplus-projects-in-unreal-engine/).
+
+3. Open the project in the Unreal Engine editor.
+
+4. Configure the plugin by going to `Project Settings -> Plugins -> Comfy Textures`.
 
     If you are running ComfyUI on a remote machine, you need to set the `Comfy Url` to the correct address.
 
-3. Open the plugin window by clicking on `Tools -> Editor Utility Widgets -> Comfy Textures Widget`.
+5. Open the plugin window by clicking on `Tools -> Editor Utility Widgets -> Comfy Textures Widget`.
 
     If the menu item is missing you need to open the `ComfyTexturesWidget` from the content browser in `Plugins/Comfy Textures Content/` and click `Run Utility Widget` in the blueprint editor.
 
