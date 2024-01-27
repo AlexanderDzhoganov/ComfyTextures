@@ -314,6 +314,13 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
         UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(ViewInfo, CustomProjectionMatrix,
           ViewMatrix, ProjectionMatrix, ViewProjectionMatrix);
 
+        if (!RenderQueue.Contains(RequestIndex))
+        {
+          UE_LOG(LogTemp, Warning, TEXT("Render queue does not contain request index"));
+          TransitionToIdleState();
+          return;
+        }
+
         const FComfyTexturesRenderDataPtr& Data = RenderQueue[RequestIndex];
         Data->ViewInfo = ViewInfo;
         Data->ViewMatrix = ViewMatrix;
@@ -1079,6 +1086,13 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
       }
 
       UComfyTexturesWidgetBase* This = WeakThis.Get();
+
+      if (!This->RenderQueue.Contains(RequestIndex))
+      {
+        UE_LOG(LogTemp, Warning, TEXT("Render queue does not contain request index"));
+        return;
+      }
+
       FComfyTexturesRenderData& Data = *This->RenderQueue[RequestIndex];
 
       if (!bWasSuccessful)
