@@ -552,9 +552,6 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
   int TextureWidth = Texture2D->GetSizeX();
   int TextureHeight = Texture2D->GetSizeY();
 
-  // iterate the faces of the static mesh
-  // 
-  // Access the LOD (Level of Detail) data of the mesh
   const FStaticMeshLODResources& MeshLod = StaticMesh->GetLODForExport(0);
 
   struct SharedData
@@ -564,9 +561,9 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
     TArray<FVector2D> Uvs;
     FComfyTexturesRenderDataPtr RenderData;
     FTransform ActorTransform;
+    UTexture2D* Texture2D;
     int TextureWidth;
     int TextureHeight;
-    UTexture2D* Texture2D;
   };
 
   TSharedPtr<SharedData> StateData = MakeShared<SharedData>();
@@ -590,8 +587,6 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
     FVector2D Uv = (FVector2D)MeshLod.VertexBuffers.StaticMeshVertexBuffer.GetVertexUV(VertexIndex, 0);
     StateData->Uvs[VertexIndex] = Uv;
   }
-
-  // get the first item from RenderData TMap
 
   AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [StateData, Callback]()
     {
@@ -2142,14 +2137,19 @@ bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, c
   FTransform ActorTransform = Actor->GetTransform();
 
   FVector Corners[8];
-  Corners[0] = ActorTransform.TransformPosition(ActorCenter + FVector(ActorExtent.X, ActorExtent.Y, ActorExtent.Z));
-  Corners[1] = ActorTransform.TransformPosition(ActorCenter + FVector(ActorExtent.X, ActorExtent.Y, -ActorExtent.Z));
-  Corners[2] = ActorTransform.TransformPosition(ActorCenter + FVector(ActorExtent.X, -ActorExtent.Y, ActorExtent.Z));
-  Corners[3] = ActorTransform.TransformPosition(ActorCenter + FVector(ActorExtent.X, -ActorExtent.Y, -ActorExtent.Z));
-  Corners[4] = ActorTransform.TransformPosition(ActorCenter + FVector(-ActorExtent.X, ActorExtent.Y, ActorExtent.Z));
-  Corners[5] = ActorTransform.TransformPosition(ActorCenter + FVector(-ActorExtent.X, ActorExtent.Y, -ActorExtent.Z));
-  Corners[6] = ActorTransform.TransformPosition(ActorCenter + FVector(-ActorExtent.X, -ActorExtent.Y, ActorExtent.Z));
-  Corners[7] = ActorTransform.TransformPosition(ActorCenter + FVector(-ActorExtent.X, -ActorExtent.Y, -ActorExtent.Z));
+  Corners[0] = FVector(ActorExtent.X, ActorExtent.Y, ActorExtent.Z);
+  Corners[1] = FVector(ActorExtent.X, ActorExtent.Y, -ActorExtent.Z);
+  Corners[2] = FVector(ActorExtent.X, -ActorExtent.Y, ActorExtent.Z);
+  Corners[3] = FVector(ActorExtent.X, -ActorExtent.Y, -ActorExtent.Z);
+  Corners[4] = FVector(-ActorExtent.X, ActorExtent.Y, ActorExtent.Z);
+  Corners[5] = FVector(-ActorExtent.X, ActorExtent.Y, -ActorExtent.Z);
+  Corners[6] = FVector(-ActorExtent.X, -ActorExtent.Y, ActorExtent.Z);
+  Corners[7] = FVector(-ActorExtent.X, -ActorExtent.Y, -ActorExtent.Z);
+
+  for (int CornerIndex = 0; CornerIndex < 8; CornerIndex++)
+  {
+    Corners[CornerIndex] = ActorTransform.TransformPosition(ActorCenter + Corners[CornerIndex]);
+  }
 
   TOptional<FMatrix> CustomProjectionMatrix;
   FMatrix ViewMatrix;
@@ -2520,10 +2520,11 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
     ViewInfo.Location = CameraTransform.GetLocation();
     ViewInfo.Rotation = CameraTransform.GetRotation();
     ViewInfo.FOV = EditorViewportClient->ViewFOV;
-    ViewInfo.ProjectionMode = ECameraProjectionMode::Perspective;
-    ViewInfo.AspectRatio = EditorViewportClient->AspectRatio;
+    ViewInfo.OrthoWidth = EditorViewportClient->GetOrthoUnitsPerPixel(EditorViewportClient->Viewport) * EditorViewportClient->Viewport->GetSizeXY().X;
+    ViewInfo.ProjectionMode = EditorViewportClient->IsOrtho() ? ECameraProjectionMode::Orthographic : ECameraProjectionMode::Perspective;
+    ViewInfo.AspectRatio = 1.0f; // EditorViewportClient->AspectRatio;
+    ViewInfo.OrthoNearClipPlane = EditorViewportClient->GetNearClipPlane();
     ViewInfo.PerspectiveNearClipPlane = EditorViewportClient->GetNearClipPlane();
-    ViewInfo.PostProcessBlendWeight = 0.0f;
 
     OutViewInfos.Add(ViewInfo);
   }
@@ -2645,6 +2646,12 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
   {
     UE_LOG(LogTemp, Error, TEXT("Unsupported camera mode."));
     return false;
+  }
+
+  for (int Index = 0; Index < OutViewInfos.Num(); Index++)
+  {
+    FMinimalViewInfo& ViewInfo = OutViewInfos[Index];
+    ViewInfo.PostProcessBlendWeight = 0.0f;
   }
 
   return true;
