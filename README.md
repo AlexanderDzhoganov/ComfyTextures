@@ -12,6 +12,7 @@ Features:
 - [x] Inpainting
 - [x] Image to image
 - [x] Remote ComfyUI instance support
+- [ ] Batch rendering (WIP)
 
 Works out of the box with Unreal Engine 5.x. Should work with 4.x with minor code changes.
 

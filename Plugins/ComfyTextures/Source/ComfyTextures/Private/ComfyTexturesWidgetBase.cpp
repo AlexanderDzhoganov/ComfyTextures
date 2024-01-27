@@ -20,6 +20,8 @@
 
 #define LOCTEXT_NAMESPACE "ComfyTextures"
 
+DEFINE_LOG_CATEGORY(LogComfyTextures);
+
 void UComfyTexturesWidgetBase::Connect()
 {
   if (!HttpClient.IsValid())
@@ -119,19 +121,19 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
 {
   if (!IsConnected())
   {
-    UE_LOG(LogTemp, Warning, TEXT("Not connected to ComfyUI"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Not connected to ComfyUI"));
     return false;
   }
 
   if (State != EComfyTexturesState::Idle)
   {
-    UE_LOG(LogTemp, Warning, TEXT("Not idle"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Not idle"));
     return false;
   }
 
   if (Actors.Num() == 0)
   {
-    UE_LOG(LogTemp, Warning, TEXT("No actors to process"));
+    UE_LOG(LogComfyTextures, Error, TEXT("No actors to process"));
     return false;
   }
 
@@ -145,7 +147,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
   TArray<FMinimalViewInfo> ViewInfos;
   if (!CreateCameraTransforms(Actors[0], RenderOpts, ViewInfos))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to create camera transforms"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to create camera transforms"));
     TransitionToIdleState();
     return false;
   }
@@ -199,7 +201,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
 
       if (Material == nullptr)
       {
-        UE_LOG(LogTemp, Error, TEXT("Material is null for actor %s."), *Actor->GetName());
+        UE_LOG(LogComfyTextures, Warning, TEXT("Material is null for actor %s."), *Actor->GetName());
         continue;
       }
 
@@ -209,14 +211,14 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
       // if the material is not a material instance dynamic, skip it
       if (MaterialInstance == nullptr)
       {
-        UE_LOG(LogTemp, Error, TEXT("Material is not a material instance dynamic for actor %s."), *Actor->GetName());
+        UE_LOG(LogComfyTextures, Warning, TEXT("Material is not a material instance dynamic for actor %s."), *Actor->GetName());
         continue;
       }
 
       UTexture* OldTexture = nullptr;
       if (!MaterialInstance->GetTextureParameterValue(TEXT("BaseColor"), OldTexture))
       {
-        UE_LOG(LogTemp, Error, TEXT("Failed to get parameter value \"BaseColor\" for actor %s."), *Actor->GetName());
+        UE_LOG(LogComfyTextures, Warning, TEXT("Failed to get parameter value \"BaseColor\" for actor %s."), *Actor->GetName());
         continue;
       }
 
@@ -229,12 +231,18 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
 
   TSharedPtr<TArray<FComfyTexturesCaptureOutput>> CaptureResults = MakeShared<TArray<FComfyTexturesCaptureOutput>>();
 
-  if (!CaptureSceneTextures(Actors[0]->GetWorld(), Actors, ViewInfos, RenderOpts.Mode, CaptureResults))
+  double CaptureSceneTexturesTime = 0.0;
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to capture input textures"));
-    TransitionToIdleState();
-    return false;
+    SCOPE_SECONDS_COUNTER(CaptureSceneTexturesTime);
+    if (!CaptureSceneTextures(Actors[0]->GetWorld(), Actors, ViewInfos, RenderOpts.Mode, CaptureResults))
+    {
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to capture input textures"));
+      TransitionToIdleState();
+      return false;
+    }
   }
+
+  UE_LOG(LogComfyTextures, Display, TEXT("Capture scene textures took %f seconds"), CaptureSceneTexturesTime);
 
   // bring back the original textures by iterating the actor to texture map
 
@@ -255,6 +263,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
   }
 
   UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
+
   ProcessSceneTextures(CaptureResults, RenderOpts.Mode, Settings->UploadSize, [this, CaptureResults, ViewInfos, RenderOpts]()
     {
       for (int Index = 0; Index < CaptureResults->Num(); Index++)
@@ -288,16 +297,16 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
           {
             if (!bSuccess)
             {
-              UE_LOG(LogTemp, Warning, TEXT("Upload failed"));
+              UE_LOG(LogComfyTextures, Error, TEXT("Upload failed"));
               TransitionToIdleState();
               return;
             }
 
-            UE_LOG(LogTemp, Warning, TEXT("Upload complete"));
+            UE_LOG(LogComfyTextures, Verbose, TEXT("Upload complete"));
 
             for (const FString& FileName : FileNames)
             {
-              UE_LOG(LogTemp, Warning, TEXT("Uploaded file: %s"), *FileName);
+              UE_LOG(LogComfyTextures, Verbose, TEXT("Uploaded file: %s"), *FileName);
             }
 
             FComfyTexturesRenderOptions NewRenderOpts = RenderOpts;
@@ -311,10 +320,16 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
               NewRenderOpts.MaskImageFilename = FileNames[4];
             }
 
+            if (State == EComfyTexturesState::Idle)
+            {
+              UE_LOG(LogComfyTextures, Warning, TEXT("State is idle"));
+              return;
+            }
+
             int RequestIndex;
             if (!QueueRender(NewRenderOpts, RequestIndex))
             {
-              UE_LOG(LogTemp, Warning, TEXT("Failed to queue render"));
+              UE_LOG(LogComfyTextures, Error, TEXT("Failed to queue render"));
               TransitionToIdleState();
               return;
             }
@@ -326,7 +341,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
 
             if (!RenderQueue.Contains(RequestIndex))
             {
-              UE_LOG(LogTemp, Warning, TEXT("Render queue does not contain request index"));
+              UE_LOG(LogComfyTextures, Error, TEXT("Render queue does not contain request index"));
               TransitionToIdleState();
               return;
             }
@@ -336,11 +351,12 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
             Data->ViewMatrix = ViewMatrix;
             Data->ProjectionMatrix = ProjectionMatrix;
             Data->RawDepth = RawDepth;
+            Data->bPreserveExisting = RenderOpts.bPreserveExisting;
           });
 
         if (!bSuccess)
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to upload capture results"));
+          UE_LOG(LogComfyTextures, Error, TEXT("Failed to upload capture results"));
           TransitionToIdleState();
         }
       }
@@ -390,14 +406,6 @@ static FLinearColor SampleBilinear(const TArray<FColor>& Pixels, int Width, int 
 
 static void ExpandTextureIslands(TArray<FColor>& Pixels, int Width, int Height, int Iterations)
 {
-  // for every iteration
-  //   for every pixel
-  //     if the pixel has alpha == 0.0
-  //       if any of the pixel's neighbors have alpha > 0.0
-  //         add 1 to the neighbor count
-  //         set the pixel's alpha to 1.0
-  //         set the pixel's color to the average of the pixel's neighbors
-
   for (int Iteration = 0; Iteration < Iterations; Iteration++)
   {
     TArray<FColor> PixelsCopy = Pixels;
@@ -467,7 +475,7 @@ static void ExpandTextureIslands(TArray<FColor>& Pixels, int Width, int Height, 
           Pixel.R = (NeighborColorSum.R / NeighborCount) * 255.0f;
           Pixel.G = (NeighborColorSum.G / NeighborCount) * 255.0f;
           Pixel.B = (NeighborColorSum.B / NeighborCount) * 255.0f;
-          Pixel.A = 255;
+          Pixel.A = 0;
           Pixels[Index] = Pixel;
         }
       }
@@ -522,7 +530,7 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
   // if the static mesh is null, skip it
   if (StaticMesh == nullptr)
   {
-    UE_LOG(LogTemp, Error, TEXT("Static mesh is null for actor %s."), *Actor->GetName());
+    UE_LOG(LogComfyTextures, Warning, TEXT("Static mesh is null for actor %s."), *Actor->GetName());
     return false;
   }
 
@@ -532,7 +540,7 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
   // if the material is null, skip it
   if (Material == nullptr)
   {
-    UE_LOG(LogTemp, Error, TEXT("Material is null for actor %s."), *Actor->GetName());
+    UE_LOG(LogComfyTextures, Warning, TEXT("Material is null for actor %s."), *Actor->GetName());
     return false;
   }
 
@@ -542,27 +550,27 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
   UTexture* Texture = nullptr;
   if (!Material->GetTextureParameterValue(TEXT("BaseColor"), Texture))
   {
-    UE_LOG(LogTemp, Error, TEXT("Failed to get parameter value \"BaseColor\" for actor %s."), *Actor->GetName());
+    UE_LOG(LogComfyTextures, Warning, TEXT("Failed to get parameter value \"BaseColor\" for actor %s."), *Actor->GetName());
     return false;
   }
 
   // if the texture is null, skip it
   if (Texture == nullptr)
   {
-    UE_LOG(LogTemp, Error, TEXT("Texture is null for actor %s."), *Actor->GetName());
+    UE_LOG(LogComfyTextures, Warning, TEXT("Texture is null for actor %s."), *Actor->GetName());
     return false;
   }
 
   Texture2D = Cast<UTexture2D>(Texture);
   if (Texture2D == nullptr)
   {
-    UE_LOG(LogTemp, Error, TEXT("Failed to create texture for actor %s."), *Actor->GetName());
+    UE_LOG(LogComfyTextures, Warning, TEXT("Failed to create texture for actor %s."), *Actor->GetName());
     return false;
   }
 
   if (Texture2D->Source.GetNumMips() <= 0)
   {
-    UE_LOG(LogTemp, Error, TEXT("No mipmaps available in texture for actor %s."), *Actor->GetName());
+    UE_LOG(LogComfyTextures, Warning, TEXT("No mipmaps available in texture for actor %s."), *Actor->GetName());
     return false;
   }
 
@@ -576,9 +584,11 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
     TArray<uint32> Indices;
     TArray<FVector> Vertices;
     TArray<FVector2D> Uvs;
+    TSharedPtr<TArray<FColor>> Pixels;
     FComfyTexturesRenderDataPtr RenderData;
     FTransform ActorTransform;
     UTexture2D* Texture2D;
+    AActor* Actor;
     int TextureWidth;
     int TextureHeight;
   };
@@ -589,6 +599,23 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
   StateData->TextureWidth = TextureWidth;
   StateData->TextureHeight = TextureHeight;
   StateData->Texture2D = Texture2D;
+  StateData->Actor = Actor;
+  StateData->Pixels = MakeShared<TArray<FColor>>();
+  StateData->Pixels->SetNumZeroed(TextureWidth * TextureHeight);
+
+  if (StateData->RenderData->bPreserveExisting)
+  {
+    FColor* MipData = (FColor*)Texture2D->Source.LockMip(0);
+    if (MipData == nullptr)
+    {
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to lock mip 0 for texture %s."), *(Texture2D->GetName()));
+      Callback(false);
+      return false;
+    }
+
+    FMemory::Memcpy(StateData->Pixels->GetData(), MipData, StateData->Pixels->Num() * sizeof(FColor));
+    Texture2D->Source.UnlockMip(0);
+  }
 
   MeshLod.IndexBuffer.GetCopy(StateData->Indices);
 
@@ -614,9 +641,6 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
       FMatrix ViewProjectionMatrix = ViewMatrix * ProjectionMatrix;
       FIntRect ViewRect(0, 0, StateData->RenderData->OutputWidth, StateData->RenderData->OutputHeight);
 
-      TSharedPtr<TArray<FColor>> Pixels = MakeShared<TArray<FColor>>();
-      Pixels->SetNumZeroed(StateData->TextureWidth * StateData->TextureHeight);
-
       // Iterate over the faces
       for (int32 FaceIndex = 0; FaceIndex < StateData->Indices.Num(); FaceIndex += 3)
       {
@@ -633,20 +657,20 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
         FVector FaceNormal = -FVector::CrossProduct(Vertex1 - Vertex0, Vertex2 - Vertex0).GetSafeNormal();
         FVector FaceNormalWorld = StateData->ActorTransform.TransformVector(FaceNormal);
 
-        float Dot = 0.0f;
+        float FaceDot = 0.0f;
         if (ViewInfo.ProjectionMode == ECameraProjectionMode::Perspective)
         {
           FVector Vertex0World = StateData->ActorTransform.TransformPosition(Vertex0);
-          Dot = FVector::DotProduct(FaceNormalWorld, (ViewInfo.Location - Vertex0World).GetSafeNormal());
+          FaceDot = FVector::DotProduct(FaceNormalWorld, (ViewInfo.Location - Vertex0World).GetSafeNormal());
         }
         else if (ViewInfo.ProjectionMode == ECameraProjectionMode::Orthographic)
         {
           // get forward vector of viewinfo
           FVector Forward = ViewInfo.Rotation.Vector();
-          Dot = FVector::DotProduct(FaceNormalWorld, -Forward);
+          FaceDot = FVector::DotProduct(FaceNormalWorld, -Forward);
         }
 
-        if (Dot <= 0.0f)
+        if (FaceDot <= 0.0f)
         {
           continue;
         }
@@ -659,7 +683,16 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
         RasterizeTriangle(Uv0, Uv1, Uv2, StateData->TextureWidth, StateData->TextureHeight, [&](int X, int Y, const FVector& Barycentric)
           {
             int PixelIndex = X + Y * StateData->TextureWidth;
-            if (PixelIndex < 0 || PixelIndex >= Pixels->Num())
+            if (PixelIndex < 0 || PixelIndex >= StateData->Pixels->Num())
+            {
+              return;
+            }
+
+            if
+            (
+              StateData->RenderData->bPreserveExisting &&
+              (*StateData->Pixels)[PixelIndex].A >= StateData->RenderData->PreserveThreshold
+            )
             {
               return;
             }
@@ -703,23 +736,19 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
             {
               FVector ViewSpacePoint = ViewMatrix.TransformPosition(WorldPosition);
 
-              float Eps = 5.0f;
+              const float Eps = 5.0f;
               if (ViewSpacePoint.Z > ClosestDepth + Eps)
               {
-                (*Pixels)[PixelIndex] = FColor(0, 0, 0, 255);//FColor(255, 0, 255, 255);
                 return;
               }
             }
             else
             {
               FVector4 ClipSpacePoint = ProjectionMatrix.TransformFVector4(FVector4(0.0f, 0.0f, ClosestDepth, 1.0f));
-
-              // Step 3: Perform Perspective Division
-              float DepthInNdc = ClipSpacePoint.Z / ClipSpacePoint.W;
-              float Eps = 0.01f;
-              if (PosInScreenSpace.Z < DepthInNdc - Eps)
+              float ClipSpaceDepth = ClipSpacePoint.Z / ClipSpacePoint.W;
+              const float Eps = 0.01f;
+              if (PosInScreenSpace.Z < ClipSpaceDepth - Eps)
               {
-                (*Pixels)[PixelIndex] = FColor(0, 0, 0, 255);//FColor(255, 0, 255, 255);
                 return;
               }
             }
@@ -727,26 +756,27 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
             // get the pixel color from the input texture
             FLinearColor Pixel = SampleBilinear(StateData->RenderData->OutputPixels, StateData->RenderData->OutputWidth,
               StateData->RenderData->OutputHeight, Uv);
+            Pixel.A = FMath::Clamp(FMath::Abs(FaceDot), 0.0f, 1.0f);
             Pixel *= 255.0f;
-            (*Pixels)[PixelIndex] = FColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
+            (*StateData->Pixels)[PixelIndex] = FColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
           });
       }
 
-      ExpandTextureIslands(*Pixels, StateData->TextureWidth, StateData->TextureHeight, 4);
+      ExpandTextureIslands(*StateData->Pixels, StateData->TextureWidth, StateData->TextureHeight, 4);
 
-      AsyncTask(ENamedThreads::GameThread, [StateData, Pixels, Callback]()
+      AsyncTask(ENamedThreads::GameThread, [StateData, Callback]()
         {
           UKismetSystemLibrary::TransactObject(StateData->Texture2D);
 
           FColor* MipData = (FColor*)StateData->Texture2D->Source.LockMip(0);
           if (MipData == nullptr)
           {
-            UE_LOG(LogTemp, Error, TEXT("Failed to lock mip 0 for texture %s."), *(StateData->Texture2D->GetName()));
+            UE_LOG(LogComfyTextures, Error, TEXT("Failed to lock mip 0 for texture %s."), *(StateData->Texture2D->GetName()));
             Callback(false);
             return false;
           }
 
-          FMemory::Memcpy(MipData, Pixels->GetData(), Pixels->Num() * sizeof(FColor));
+          FMemory::Memcpy(MipData, StateData->Pixels->GetData(), StateData->Pixels->Num() * sizeof(FColor));
 
           StateData->Texture2D->Source.UnlockMip(0);
           StateData->Texture2D->MarkPackageDirty();
@@ -766,14 +796,14 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
 {
   if (!ValidateAllRequestsSucceeded())
   {
-    UE_LOG(LogTemp, Warning, TEXT("Not all requests succeeded"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Not all requests succeeded"));
     TransitionToIdleState();
     return false;
   }
 
   if (RenderQueue.Num() == 0)
   {
-    UE_LOG(LogTemp, Warning, TEXT("No requests to process"));
+    UE_LOG(LogComfyTextures, Error, TEXT("No requests to process"));
     TransitionToIdleState();
     return false;
   }
@@ -782,14 +812,14 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
     {
       if (!bSuccess)
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to load render result images"));
+        UE_LOG(LogComfyTextures, Error, TEXT("Failed to load render result images"));
         TransitionToIdleState();
         return;
       }
 
       if (UKismetSystemLibrary::BeginTransaction("ComfyTextures", FText::FromString("Comfy Textures Process Actors"), nullptr) != 0)
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to begin transaction"));
+        UE_LOG(LogComfyTextures, Error, TEXT("Failed to begin transaction"));
         TransitionToIdleState();
         return;
       }
@@ -802,7 +832,7 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
           {
             if (!bSuccess)
             {
-              UE_LOG(LogTemp, Warning, TEXT("Failed to process render result for actor %s"), *Actor->GetName());
+              UE_LOG(LogComfyTextures, Warning, TEXT("Failed to process render result for actor %s"), *Actor->GetName());
             }
 
             (*NumPending)--;
@@ -810,7 +840,7 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
             {
               if (UKismetSystemLibrary::EndTransaction() != -1)
               {
-                UE_LOG(LogTemp, Warning, TEXT("Failed to end transaction"));
+                UE_LOG(LogComfyTextures, Warning, TEXT("Failed to end transaction"));
               }
 
               TransitionToIdleState();
@@ -827,7 +857,7 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
       {
         if (UKismetSystemLibrary::EndTransaction() != -1)
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to end transaction"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to end transaction"));
         }
 
         TransitionToIdleState();
@@ -844,7 +874,7 @@ void UComfyTexturesWidgetBase::CancelJob()
 {
   if (State != EComfyTexturesState::Rendering)
   {
-    UE_LOG(LogTemp, Warning, TEXT("Not rendering"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Not rendering"));
     return;
   }
 
@@ -924,13 +954,13 @@ static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
   {
     if (!Node->HasField("inputs"))
     {
-      UE_LOG(LogTemp, Warning, TEXT("Node %s does not have inputs"), *NodeName);
+      UE_LOG(LogComfyTextures, Warning, TEXT("Node %s does not have inputs"), *NodeName);
       continue;
     }
 
     if (!Node->GetObjectField("inputs")->HasField(PropertyName))
     {
-      UE_LOG(LogTemp, Warning, TEXT("Node %s does not have input %s"), *NodeName, *PropertyName);
+      UE_LOG(LogComfyTextures, Warning, TEXT("Node %s does not have input %s"), *NodeName, *PropertyName);
       continue;
     }
 
@@ -1008,21 +1038,21 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
 {
   if (!IsConnected())
   {
-    UE_LOG(LogTemp, Warning, TEXT("Not connected to ComfyUI"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Not connected to ComfyUI"));
     return false;
   }
 
   FString WorkflowJsonPath = GetWorkflowJsonPath(RenderOpts.Mode);
   if (!FPaths::FileExists(WorkflowJsonPath))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Workflow JSON file does not exist: %s"), *WorkflowJsonPath);
+    UE_LOG(LogComfyTextures, Error, TEXT("Workflow JSON file does not exist: %s"), *WorkflowJsonPath);
     return false;
   }
 
   FString JsonString = "";
   if (!FFileHelper::LoadFileToString(JsonString, *WorkflowJsonPath))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to load workflow JSON file: %s"), *WorkflowJsonPath);
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to load workflow JSON file: %s"), *WorkflowJsonPath);
     return false;
   }
 
@@ -1031,7 +1061,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
 
   if (!FJsonSerializer::Deserialize(Reader, Workflow))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize workflow JSON"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to deserialize workflow JSON"));
     return false;
   }
 
@@ -1081,7 +1111,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
   TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
   FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
 
-  UE_LOG(LogTemp, Warning, TEXT("Sending render request: %s"), *RequestBodyString);
+  UE_LOG(LogComfyTextures, Verbose, TEXT("Sending render request: %s"), *RequestBodyString);
 
   RequestIndex = NextRequestIndex++;
   RenderQueue.Add(RequestIndex, MakeShared<FComfyTexturesRenderData>());
@@ -1099,7 +1129,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
 
       if (!This->RenderQueue.Contains(RequestIndex))
       {
-        UE_LOG(LogTemp, Warning, TEXT("Render queue does not contain request index"));
+        UE_LOG(LogComfyTextures, Error, TEXT("Render queue does not contain request index"));
         return;
       }
 
@@ -1107,7 +1137,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
 
       if (!bWasSuccessful)
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to send render request"));
+        UE_LOG(LogComfyTextures, Error, TEXT("Failed to send render request"));
         Data.State = EComfyTexturesRenderState::Failed;
         This->HandleRenderStateChanged(Data);
         return;
@@ -1119,12 +1149,12 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
 
       if (Response->HasField("error"))
       {
-        UE_LOG(LogTemp, Warning, TEXT("Render request failed"));
+        UE_LOG(LogComfyTextures, Error, TEXT("Render request failed"));
         Data.State = EComfyTexturesRenderState::Failed;
       }
       else
       {
-        UE_LOG(LogTemp, Warning, TEXT("Render request successful"));
+        UE_LOG(LogComfyTextures, Verbose, TEXT("Render request successful"));
       }
 
       This->PromptIdToRequestIndex.Add(PromptId, RequestIndex);
@@ -1136,7 +1166,7 @@ void UComfyTexturesWidgetBase::InterruptRender() const
 {
   if (!IsConnected())
   {
-    UE_LOG(LogTemp, Warning, TEXT("Not connected to ComfyUI"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Not connected to ComfyUI"));
     return;
   }
 
@@ -1146,17 +1176,17 @@ void UComfyTexturesWidgetBase::InterruptRender() const
   TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
   FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
 
-  UE_LOG(LogTemp, Warning, TEXT("Sending interrupt request: %s"), *RequestBodyString);
+  UE_LOG(LogComfyTextures, Verbose, TEXT("Sending interrupt request: %s"), *RequestBodyString);
 
   HttpClient->DoHttpPostRequest("interrupt", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to send interrupt request"));
+        UE_LOG(LogComfyTextures, Warning, TEXT("Failed to send interrupt request"));
         return;
       }
 
-      UE_LOG(LogTemp, Warning, TEXT("Interrupt request successful"));
+      UE_LOG(LogComfyTextures, Verbose, TEXT("Interrupt request successful"));
     });
 }
 
@@ -1164,7 +1194,7 @@ void UComfyTexturesWidgetBase::ClearRenderQueue()
 {
   if (!IsConnected())
   {
-    UE_LOG(LogTemp, Warning, TEXT("Not connected to ComfyUI"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Not connected to ComfyUI"));
     return;
   }
 
@@ -1175,17 +1205,17 @@ void UComfyTexturesWidgetBase::ClearRenderQueue()
   TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
   FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
 
-  UE_LOG(LogTemp, Warning, TEXT("Sending clear request: %s"), *RequestBodyString);
+  UE_LOG(LogComfyTextures, Verbose, TEXT("Sending clear request: %s"), *RequestBodyString);
 
   HttpClient->DoHttpPostRequest("queue", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to send clear request"));
+        UE_LOG(LogComfyTextures, Warning, TEXT("Failed to send clear request"));
         return;
       }
 
-      UE_LOG(LogTemp, Warning, TEXT("Clear request successful"));
+      UE_LOG(LogComfyTextures, Verbose, TEXT("Clear request successful"));
     });
 }
 
@@ -1193,7 +1223,7 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
 {
   if (!IsConnected())
   {
-    UE_LOG(LogTemp, Warning, TEXT("Not connected to ComfyUI"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Not connected to ComfyUI"));
     return;
   }
 
@@ -1209,17 +1239,17 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
     TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
     FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
 
-    UE_LOG(LogTemp, Warning, TEXT("Sending free memory request: %s"), *RequestBodyString);
+    UE_LOG(LogComfyTextures, Verbose, TEXT("Sending free memory request: %s"), *RequestBodyString);
 
     HttpClient->DoHttpPostRequest("free", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
       {
         if (!bWasSuccessful)
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to send cleanup request"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to send cleanup request"));
           return;
         }
 
-        UE_LOG(LogTemp, Warning, TEXT("Cleanup request successful"));
+        UE_LOG(LogComfyTextures, Verbose, TEXT("Cleanup request successful"));
       });
   }
 
@@ -1230,17 +1260,17 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
   TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
   FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
 
-  UE_LOG(LogTemp, Warning, TEXT("Sending history clear request: %s"), *RequestBodyString);
+  UE_LOG(LogComfyTextures, Verbose, TEXT("Sending history clear request: %s"), *RequestBodyString);
 
   HttpClient->DoHttpPostRequest("history", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to send history clear request"));
+        UE_LOG(LogComfyTextures, Warning, TEXT("Failed to send history clear request"));
         return;
       }
 
-      UE_LOG(LogTemp, Warning, TEXT("History clear request successful"));
+      UE_LOG(LogComfyTextures, Verbose, TEXT("History clear request successful"));
     });
 }
 
@@ -1248,13 +1278,13 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
 {
   if (Actors.Num() == 0)
   {
-    UE_LOG(LogTemp, Warning, TEXT("No actors to prepare"));
+    UE_LOG(LogComfyTextures, Error, TEXT("No actors to prepare"));
     return false;
   }
 
   if (PrepareOpts.BaseMaterial == nullptr)
   {
-    UE_LOG(LogTemp, Warning, TEXT("Base material is null"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Base material is null"));
     return false;
   }
 
@@ -1262,14 +1292,14 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
   UTexture2D* ReferenceTexture = PrepareOpts.ReferenceTexture;
   if (ReferenceTexture == nullptr)
   {
-    UE_LOG(LogTemp, Warning, TEXT("Reference texture is null"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Reference texture is null"));
     return false;
   }
 
   void* ReferenceMipData = ReferenceTexture->Source.LockMip(0);
   if (ReferenceMipData == nullptr)
   {
-    UE_LOG(LogTemp, Error, TEXT("Failed to lock texture mip data"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to lock texture mip data"));
     return false;
   }
 
@@ -1313,11 +1343,11 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
     FBox2D ActorScreenBounds;
     if (!CalculateApproximateScreenBounds(Actor, PrepareOpts.ViewInfo, ActorScreenBounds))
     {
-      UE_LOG(LogTemp, Error, TEXT("Failed to calculate screen bounds for actor %s."), *Actor->GetName());
+      UE_LOG(LogComfyTextures, Warning, TEXT("Failed to calculate screen bounds for actor %s."), *Actor->GetName());
       continue;
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("Actor %s screen bounds: %s."), *Actor->GetName(), *ActorScreenBounds.ToString());
+    UE_LOG(LogComfyTextures, Verbose, TEXT("Actor %s screen bounds: %s."), *Actor->GetName(), *ActorScreenBounds.ToString());
 
     FVector2D SizeOnScreen = ActorScreenBounds.GetSize();
     float LargerSize = FMath::Max(SizeOnScreen.X, SizeOnScreen.Y);
@@ -1330,7 +1360,7 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
     TextureSize = FMath::Clamp(TextureSize, Settings->MinTextureSize, Settings->MaxTextureSize);
     TextureSize = FMath::RoundUpToPowerOfTwo(TextureSize);
 
-    UE_LOG(LogTemp, Warning, TEXT("Chosen texture size: %d for actor %s."), TextureSize, *Actor->GetName());
+    UE_LOG(LogComfyTextures, Verbose, TEXT("Chosen texture size: %d for actor %s."), TextureSize, *Actor->GetName());
 
     FString TextureName = "GeneratedTexture_" + Id;
 
@@ -1343,7 +1373,7 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
     UTexture2D* Texture2D = CreateTexture2D(TextureSize, TextureSize, RescaledReferencePixels);
     if (Texture2D == nullptr)
     {
-      UE_LOG(LogTemp, Error, TEXT("Failed to create texture %s"), *TextureName);
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to create texture %s"), *TextureName);
       return false;
     }
 
@@ -1351,7 +1381,7 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
 
     if (!CreateAssetPackage(Texture2D, "/Game/Textures/Generated/"))
     {
-      UE_LOG(LogTemp, Error, TEXT("Failed to create asset package for texture %s"), *TextureName);
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to create asset package for texture %s"), *TextureName);
       return false;
     }
 
@@ -1364,7 +1394,7 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
 
     if (!CreateAssetPackage(MaterialInstance, "/Game/Materials/Generated/"))
     {
-      UE_LOG(LogTemp, Error, TEXT("Failed to create asset package for material instance %s"), *MaterialName);
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to create asset package for material instance %s"), *MaterialName);
       return false;
     }
 
@@ -1384,7 +1414,7 @@ bool UComfyTexturesWidgetBase::ParseWorkflowJson(const FString& JsonPath, FComfy
   FString JsonString = "";
   if (!FFileHelper::LoadFileToString(JsonString, *JsonPath))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to load workflow JSON file: %s"), *JsonPath);
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to load workflow JSON file: %s"), *JsonPath);
     return false;
   }
 
@@ -1393,7 +1423,7 @@ bool UComfyTexturesWidgetBase::ParseWorkflowJson(const FString& JsonPath, FComfy
 
   if (!FJsonSerializer::Deserialize(Reader, Workflow))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize workflow JSON"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to deserialize workflow JSON file: %s"), *JsonPath);
     return false;
   }
 
@@ -1453,7 +1483,7 @@ FString UComfyTexturesWidgetBase::GetWorkflowJsonPath(EComfyTexturesMode Mode) c
   }
   else
   {
-    UE_LOG(LogTemp, Warning, TEXT("Invalid mode"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Invalid mode"));
   }
 
   return JsonPath;
@@ -1461,6 +1491,12 @@ FString UComfyTexturesWidgetBase::GetWorkflowJsonPath(EComfyTexturesMode Mode) c
 
 void UComfyTexturesWidgetBase::SetEditorFrameRate(int Fps)
 {
+  UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
+  if (!Settings->bLimitEditorFps)
+  {
+    return;
+  }
+
   GEditor->SetMaxFPS(Fps);
 }
 
@@ -1520,10 +1556,10 @@ bool UComfyTexturesWidgetBase::LoadParams()
 
     FComfyTexturesWorkflowParams Param;
     Param.EditMaskMode = EComfyTexturesEditMaskMode::FromObject;
+
     if (!ParseWorkflowJson(JsonPath, Param))
     {
-      UE_LOG(LogTemp, Warning, TEXT("Failed to parse workflow JSON"));
-      return false;
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to parse workflow JSON file: %s"), *JsonPath);
     }
 
     Params.Add(Mode, Param);
@@ -1536,7 +1572,7 @@ bool UComfyTexturesWidgetBase::LoadParams()
 
   if (!FFileHelper::LoadFileToString(JsonString, *ConfigPath))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to load widget params JSON file: %s"), *ConfigPath);
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to load widget params JSON file: %s"), *ConfigPath);
     return false;
   }
 
@@ -1545,7 +1581,7 @@ bool UComfyTexturesWidgetBase::LoadParams()
   TSharedPtr<FJsonObject> ParamsObject;
   if (!FJsonSerializer::Deserialize(Reader, ParamsObject))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize widget params JSON"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to deserialize widget params JSON"));
     return false;
   }
 
@@ -1584,7 +1620,7 @@ bool UComfyTexturesWidgetBase::LoadParams()
     }
     else
     {
-      UE_LOG(LogTemp, Warning, TEXT("Invalid mode"));
+      UE_LOG(LogComfyTextures, Error, TEXT("Invalid mode"));
     }
   }
 
@@ -1628,7 +1664,8 @@ bool UComfyTexturesWidgetBase::SaveParams()
     }
     else
     {
-      UE_LOG(LogTemp, Warning, TEXT("Invalid mode"));
+      UE_LOG(LogComfyTextures, Error, TEXT("Invalid mode"));
+      return false;
     }
 
     ParamsObject->SetObjectField(ModeString, ParamObject);
@@ -1650,7 +1687,7 @@ void UComfyTexturesWidgetBase::GetParams(EComfyTexturesMode Mode, FComfyTextures
 {
   if (!Params.Contains(Mode))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Params does not contain mode %d"), (int)Mode);
+    UE_LOG(LogComfyTextures, Error, TEXT("Params does not contain mode %d"), (int)Mode);
     return;
   }
 
@@ -1687,34 +1724,34 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
   FString MessageType;
   if (!Message->TryGetStringField("type", MessageType))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Websocket message missing type field"));
+    UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing type field"));
     return;
   }
 
   const TSharedPtr<FJsonObject>* MessageData;
   if (!Message->TryGetObjectField("data", MessageData))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Websocket message missing data field"));
+    UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing data field"));
     return;
   }
 
   FString PromptId;
   if (!(*MessageData)->TryGetStringField("prompt_id", PromptId))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Websocket message missing prompt_id field"));
+    UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing prompt_id field"));
     return;
   }
 
   if (!PromptIdToRequestIndex.Contains(PromptId))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Received websocket message for unknown prompt_id: %s"), *PromptId);
+    UE_LOG(LogComfyTextures, Warning, TEXT("Received websocket message for unknown prompt_id: %s"), *PromptId);
     return;
   }
 
   int RequestIndex = PromptIdToRequestIndex[PromptId];
   if (!RenderQueue.Contains(RequestIndex))
   {
-    UE_LOG(LogTemp, Warning, TEXT("Received websocket message for unknown request index: %d"), RequestIndex);
+    UE_LOG(LogComfyTextures, Warning, TEXT("Received websocket message for unknown request index: %d"), RequestIndex);
     return;
   }
 
@@ -1748,14 +1785,14 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
     float Value;
     if (!(*MessageData)->TryGetNumberField("value", Value))
     {
-      UE_LOG(LogTemp, Warning, TEXT("Websocket message missing value field"));
+      UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing value field"));
       return;
     }
 
     float Max;
     if (!(*MessageData)->TryGetNumberField("max", Max))
     {
-      UE_LOG(LogTemp, Warning, TEXT("Websocket message missing max field"));
+      UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing max field"));
       return;
     }
 
@@ -1767,7 +1804,7 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
     const TSharedPtr<FJsonObject>* OutputData;
     if (!(*MessageData)->TryGetObjectField("output", OutputData))
     {
-      UE_LOG(LogTemp, Warning, TEXT("Websocket message missing output field"));
+      UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing output field"));
       return;
     }
 
@@ -1776,7 +1813,7 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
 
     if (!(*OutputData)->TryGetArrayField("images", Images))
     {
-      UE_LOG(LogTemp, Warning, TEXT("Websocket message missing images field"));
+      UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing images field"));
       return;
     }
 
@@ -1785,28 +1822,28 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
       const TSharedPtr<FJsonObject>* ImageObject;
       if (!Image->TryGetObject(ImageObject))
       {
-        UE_LOG(LogTemp, Warning, TEXT("Websocket message missing image object"));
+        UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing image object"));
         return;
       }
 
       FString Filename;
       if (!(*ImageObject)->TryGetStringField("filename", Filename))
       {
-        UE_LOG(LogTemp, Warning, TEXT("Websocket message missing filename field"));
+        UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing filename field"));
         return;
       }
 
       FString Subfolder;
       if (!(*ImageObject)->TryGetStringField("subfolder", Subfolder))
       {
-        UE_LOG(LogTemp, Warning, TEXT("Websocket message missing subfolder field"));
+        UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing subfolder field"));
         return;
       }
 
       FString Type;
       if (!(*ImageObject)->TryGetStringField("type", Type))
       {
-        UE_LOG(LogTemp, Warning, TEXT("Websocket message missing type field"));
+        UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing type field"));
         return;
       }
 
@@ -1822,7 +1859,7 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
   }
   else
   {
-    UE_LOG(LogTemp, Warning, TEXT("Unknown websocket message type: %s"), *MessageType);
+    UE_LOG(LogComfyTextures, Warning, TEXT("Unknown websocket message type: %s"), *MessageType);
   }
 }
 
@@ -1866,8 +1903,6 @@ bool UComfyTexturesWidgetBase::ReadRenderTargetPixels(UTextureRenderTarget2D* In
       MinDepth = FMath::Min(MinDepth, Depth);
       MaxDepth = FMath::Max(MaxDepth, Depth);
     }
-
-    UE_LOG(LogTemp, Warning, TEXT("MinDepth: %f, MaxDepth: %f"), MinDepth, MaxDepth);
 
     for (int Index = 0; Index < Pixels.Num(); Index++)
     {
@@ -1919,7 +1954,7 @@ bool UComfyTexturesWidgetBase::ReadRenderTargetPixels(UTextureRenderTarget2D* In
   }
   else
   {
-    UE_LOG(LogTemp, Warning, TEXT("Unknown render texture mode: %d"), (int)Mode);
+    UE_LOG(LogComfyTextures, Error, TEXT("Unknown render texture mode: %d"), (int)Mode);
     return false;
   }
 
@@ -1928,7 +1963,7 @@ bool UComfyTexturesWidgetBase::ReadRenderTargetPixels(UTextureRenderTarget2D* In
 
 bool UComfyTexturesWidgetBase::ConvertImageToPng(const FComfyTexturesImageData& Image, TArray64<uint8>& OutBytes) const
 {
-  UE_LOG(LogTemp, Warning, TEXT("Converting image to PNG with Width: %d, Height: %d"), Image.Width, Image.Height);
+  UE_LOG(LogComfyTextures, Verbose, TEXT("Converting image to PNG with Width: %d, Height: %d"), Image.Width, Image.Height);
 
   TArray<FColor> Image8;
   Image8.SetNum(Image.Pixels.Num());
@@ -1956,7 +1991,7 @@ bool UComfyTexturesWidgetBase::UploadImages(const TArray<FComfyTexturesImageData
 {
   if (Images.Num() != FileNames.Num())
   {
-    UE_LOG(LogTemp, Warning, TEXT("Image and filename count do not match"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Image and filename count do not match"));
     Callback(TArray<FString>(), false);
     return false;
   }
@@ -1991,7 +2026,7 @@ bool UComfyTexturesWidgetBase::UploadImages(const TArray<FComfyTexturesImageData
           {
             if (!bWasSuccessful)
             {
-              UE_LOG(LogTemp, Warning, TEXT("Failed to upload image"));
+              UE_LOG(LogComfyTextures, Error, TEXT("Failed to upload image"));
               StateData->bAllSuccessful = false;
             }
             else
@@ -2003,7 +2038,7 @@ bool UComfyTexturesWidgetBase::UploadImages(const TArray<FComfyTexturesImageData
               }
               else
               {
-                UE_LOG(LogTemp, Warning, TEXT("Failed to get image url"));
+                UE_LOG(LogComfyTextures, Error, TEXT("Failed to get image url"));
                 StateData->bAllSuccessful = false;
               }
             }
@@ -2030,7 +2065,7 @@ bool UComfyTexturesWidgetBase::DownloadImage(const FString& FileName, TFunction<
 
       if (!bWasSuccessful)
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to download image"));
+        UE_LOG(LogComfyTextures, Error, TEXT("Failed to download image"));
         Callback(Pixels, 0, 0, false);
         return;
       }
@@ -2042,7 +2077,7 @@ bool UComfyTexturesWidgetBase::DownloadImage(const FString& FileName, TFunction<
       // Set the compressed data for the image wrapper
       if (!ImageWrapper.IsValid() || !ImageWrapper->SetCompressed(PngData.GetData(), PngData.Num()))
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to decompress image"));
+        UE_LOG(LogComfyTextures, Error, TEXT("Failed to decompress image"));
         Callback(Pixels, 0, 0, false);
         return;
       }
@@ -2051,7 +2086,7 @@ bool UComfyTexturesWidgetBase::DownloadImage(const FString& FileName, TFunction<
       TArray<uint8> RawData;
       if (!ImageWrapper->GetRaw(ERGBFormat::BGRA, 8, RawData))
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to decompress image"));
+        UE_LOG(LogComfyTextures, Error, TEXT("Failed to decompress image"));
         Callback(Pixels, 0, 0, false);
         return;
       }
@@ -2084,7 +2119,7 @@ bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, c
 {
   if (Actor == nullptr)
   {
-    UE_LOG(LogTemp, Error, TEXT("Actor is null."));
+    UE_LOG(LogComfyTextures, Error, TEXT("Actor is null."));
     return false;
   }
 
@@ -2157,7 +2192,7 @@ UTexture2D* UComfyTexturesWidgetBase::CreateTexture2D(int Width, int Height, con
 {
   if (Pixels.Num() != Width * Height)
   {
-    UE_LOG(LogTemp, Error, TEXT("Pixels.Num() != Width * Height"));
+    UE_LOG(LogComfyTextures, Error, TEXT("Pixels.Num() != Width * Height"));
     return nullptr;
   }
 
@@ -2211,13 +2246,13 @@ bool UComfyTexturesWidgetBase::CreateAssetPackage(UObject* Asset, FString Packag
 {
   if (Asset == nullptr)
   {
-    UE_LOG(LogTemp, Error, TEXT("Asset is null."));
+    UE_LOG(LogComfyTextures, Error, TEXT("Asset is null."));
     return false;
   }
 
   if (PackagePath.Len() == 0)
   {
-    UE_LOG(LogTemp, Error, TEXT("Package path is empty."));
+    UE_LOG(LogComfyTextures, Error, TEXT("Package path is empty."));
     return false;
   }
 
@@ -2247,11 +2282,11 @@ bool UComfyTexturesWidgetBase::CreateAssetPackage(UObject* Asset, FString Packag
 
   FString PackageFileName = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
 
-  UE_LOG(LogTemp, Warning, TEXT("Saving asset %s to %s"), *Asset->GetName(), *PackageFileName);
+  UE_LOG(LogComfyTextures, Verbose, TEXT("Saving asset %s to %s"), *Asset->GetName(), *PackageFileName);
 
   if (!UPackage::SavePackage(Package, Asset, *PackageFileName, SaveArgs))
   {
-    UE_LOG(LogTemp, Error, TEXT("Failed to save package to %s"), *PackageFileName);
+    UE_LOG(LogComfyTextures, Error, TEXT("Failed to save package to %s"), *PackageFileName);
     return false;
   }
 
@@ -2388,7 +2423,7 @@ void UComfyTexturesWidgetBase::CreateEdgeMask(const FComfyTexturesImageData& Dep
 {
   if (Depth.Width != Normals.Width || Depth.Height != Normals.Height)
   {
-    UE_LOG(LogTemp, Error, TEXT("Depth and normals images have different dimensions."));
+    UE_LOG(LogComfyTextures, Error, TEXT("Depth and normals images have different dimensions."));
     return;
   }
 
@@ -2410,8 +2445,6 @@ void UComfyTexturesWidgetBase::CreateEdgeMask(const FComfyTexturesImageData& Dep
 
   float DepthThreshold = ComputeAdaptiveThreshold(DepthGrad, AvgDepth, DepthBaseThreshold);
   float NormalsThreshold = ComputeAdaptiveThreshold(NormalsGrad, AvgNormals, NormalsBaseThreshold);
-
-  UE_LOG(LogTemp, Warning, TEXT("CreateEdgeMask(): DepthThreshold: %f, NormalsThreshold: %f"), DepthThreshold, NormalsThreshold);
 
   // Assuming Depth and Normals are of the same dimensions
   for (int Y = 0; Y < Depth.Height; Y++)
@@ -2459,7 +2492,7 @@ void UComfyTexturesWidgetBase::LoadRenderResultImages(TFunction<void(bool)> Call
           {
             if (!bWasSuccessful)
             {
-              UE_LOG(LogTemp, Warning, TEXT("Failed to download image %s"), *FileName);
+              UE_LOG(LogComfyTextures, Error, TEXT("Failed to download image %s"), *FileName);
               StateData->bAllSuccessful = false;
             }
             else
@@ -2478,7 +2511,7 @@ void UComfyTexturesWidgetBase::LoadRenderResultImages(TFunction<void(bool)> Call
 
         if (!bSuccess)
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to download image"));
+          UE_LOG(LogComfyTextures, Error, TEXT("Failed to download image %s"), *FileName);
           StateData->bAllSuccessful = false;
 
           // Check if this is the last task
@@ -2505,7 +2538,7 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
 {
   if (Actor == nullptr)
   {
-    UE_LOG(LogTemp, Error, TEXT("Actor is null."));
+    UE_LOG(LogComfyTextures, Error, TEXT("Actor is null."));
     return false;
   }
 
@@ -2536,7 +2569,7 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
   {
     if (RenderOpts.ExistingCamera == nullptr)
     {
-      UE_LOG(LogTemp, Error, TEXT("Existing camera is null."));
+      UE_LOG(LogComfyTextures, Error, TEXT("Existing camera is null."));
       return false;
     }
 
@@ -2545,7 +2578,7 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
     UCameraComponent* CameraComponent = RenderOpts.ExistingCamera->FindComponentByClass<UCameraComponent>();
     if (CameraComponent == nullptr)
     {
-      UE_LOG(LogTemp, Error, TEXT("Camera component not found."));
+      UE_LOG(LogComfyTextures, Error, TEXT("Camera component not found."));
       return false;
     }
 
@@ -2554,101 +2587,9 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
 
     OutViewInfos.Add(ViewInfo);
   }
-  else if (RenderOpts.CameraMode == EComfyTexturesCameraMode::EightSides)
-  {
-    // get the actor bounds
-    FBox ActorBounds = Actor->GetComponentsBoundingBox();
-
-    // get the actor center
-    FVector ActorCenter = ActorBounds.GetCenter();
-
-    // get the actor extent
-    FVector ActorExtent = ActorBounds.GetExtent();
-
-    // create a transform for each side of the actor
-
-    float CameraFov = 75.0f;
-    float GreatestExtent = FMath::Max(ActorExtent.X, FMath::Max(ActorExtent.Y, ActorExtent.Z));
-    float Distance = GreatestExtent / FMath::Tan(CameraFov * (float)PI / 360.0f);
-    Distance *= 2.0f;
-
-    /*FMinimalViewInfo FrontViewInfo;
-    FrontViewInfo.Location = ActorCenter + FVector(Distance, 0.0f, 0.0f);
-    FrontViewInfo.Rotation = FQuat::MakeFromEuler(FVector(0.0f, 0.0f, 180.0f));
-    FrontViewInfo.FOV = CameraFov;
-    FrontViewInfo.ProjectionMode = ECameraProjectionMode::Perspective;
-    FrontViewInfo.AspectRatio = 1.0f;
-    FrontViewInfo.PerspectiveNearClipPlane = 0.1f;
-    FrontViewInfo.PostProcessBlendWeight = 0.0f;
-    OutViewInfos.Add(FrontViewInfo);*/
-
-    /*FTransform FrontTransform;
-    FrontTransform.SetLocation(ActorCenter + FVector(Distance, 0.0f, 0.0f));
-    FrontTransform.SetRotation(FQuat::MakeFromEuler(FVector(0.0f, 0.0f, 180.0f)));
-    OutCameraTransforms.Add(FrontTransform);
-
-    FTransform BackTransform;
-    BackTransform.SetLocation(ActorCenter + FVector(-Distance, 0.0f, 0.0f));
-    BackTransform.SetRotation(FQuat::MakeFromEuler(FVector(0.0f, 0.0f, 0.0f)));
-    OutCameraTransforms.Add(BackTransform);
-
-    FTransform LeftTransform;
-    LeftTransform.SetLocation(ActorCenter + FVector(0.0f, Distance, 0.0f));
-    LeftTransform.SetRotation(FQuat::MakeFromEuler(FVector(0.0f, 0.0f, -90.0f)));
-    OutCameraTransforms.Add(LeftTransform);
-
-    FTransform RightTransform;
-    RightTransform.SetLocation(ActorCenter + FVector(0.0f, -Distance, 0.0f));
-    RightTransform.SetRotation(FQuat::MakeFromEuler(FVector(0.0f, 0.0f, 90.0f)));
-    OutCameraTransforms.Add(RightTransform);
-
-    FTransform TopTransform;
-    TopTransform.SetLocation(ActorCenter + FVector(0.0f, 0.0f, Distance));
-    TopTransform.SetRotation(FQuat::MakeFromEuler(FVector(0.0f, -90.0f, 0.0f)));
-    OutCameraTransforms.Add(TopTransform);
-
-    FTransform BottomTransform;
-    BottomTransform.SetLocation(ActorCenter + FVector(0.0f, 0.0f, -Distance));
-    BottomTransform.SetRotation(FQuat::MakeFromEuler(FVector(0.0f, 90.0f, 0.0f)));
-    OutCameraTransforms.Add(BottomTransform);*/
-  }
-  else if (RenderOpts.CameraMode == EComfyTexturesCameraMode::Orbit)
-  {
-    // get the actor bounds
-    FBox ActorBounds = Actor->GetComponentsBoundingBox();
-
-    // get the actor center
-    FVector ActorCenter = ActorBounds.GetCenter();
-
-    // get the actor extent
-    FVector ActorExtent = ActorBounds.GetExtent();
-
-    // create a transform for each orbit step
-    // OrbitSteps - number of steps to split the orbit into
-    // OrbitHeight - height of the orbit
-    // make sure to look at the actor center
-
-    float CameraFov = 90.0f;
-    float GreatestExtent = FMath::Max(ActorExtent.X, FMath::Max(ActorExtent.Y, ActorExtent.Z));
-    float Distance = GreatestExtent / FMath::Tan(CameraFov * (float)PI / 360.0f);
-
-    for (int Index = 0; Index < RenderOpts.OrbitSteps; Index++)
-    {
-      float Angle = Index * 360.0f / RenderOpts.OrbitSteps;
-      float X = FMath::Cos(Angle * (float)PI / 180.0f);
-      float Y = FMath::Sin(Angle * (float)PI / 180.0f);
-      float Z = RenderOpts.OrbitHeight;
-
-      /*FTransform Transform;
-      Transform.SetLocation(ActorCenter + FVector(X * Distance, Y * Distance, Z));
-      Transform.SetRotation(FQuat::MakeFromEuler(FVector(0.0f, 0.0f, Angle)));
-      OutCameraTransforms.Add(Transform);
-      OutPromptAffixes.Add(FString::Printf(TEXT("orbit angle %d"), (int)Angle));*/
-    }
-  }
   else
   {
-    UE_LOG(LogTemp, Error, TEXT("Unsupported camera mode."));
+    UE_LOG(LogComfyTextures, Error, TEXT("Unsupported camera mode."));
     return false;
   }
 
@@ -2663,6 +2604,30 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
 
 bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor*> Actors, const TArray<FMinimalViewInfo>& ViewInfos, EComfyTexturesMode Mode, const TSharedPtr<TArray<FComfyTexturesCaptureOutput>>& Outputs) const
 {
+  if (World == nullptr)
+  {
+    UE_LOG(LogComfyTextures, Error, TEXT("World is null."));
+    return false;
+  }
+
+  if (Actors.Num() == 0)
+  {
+    UE_LOG(LogComfyTextures, Error, TEXT("Actors is empty."));
+    return false;
+  }
+
+  if (ViewInfos.Num() == 0)
+  {
+    UE_LOG(LogComfyTextures, Error, TEXT("ViewInfos is empty."));
+    return false;
+  }
+
+  if (Outputs == nullptr)
+  {
+    UE_LOG(LogComfyTextures, Error, TEXT("Outputs is null."));
+    return false;
+  }
+
   UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
 
   // create RTF RGBA8 render target
@@ -2703,13 +2668,13 @@ bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor
 
     if (!ReadRenderTargetPixels(RenderTarget, EComfyTexturesRenderTextureMode::Depth, Output.Depth))
     {
-      UE_LOG(LogTemp, Error, TEXT("Failed to read render target pixels."));
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to read render target pixels."));
       return false;
     }
 
     if (!ReadRenderTargetPixels(RenderTarget, EComfyTexturesRenderTextureMode::RawDepth, Output.RawDepth))
     {
-      UE_LOG(LogTemp, Error, TEXT("Failed to read render target pixels."));
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to read render target pixels."));
       return false;
     }
 
@@ -2718,7 +2683,7 @@ bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor
 
     if (!ReadRenderTargetPixels(RenderTarget, EComfyTexturesRenderTextureMode::Color, Output.Color))
     {
-      UE_LOG(LogTemp, Error, TEXT("Failed to read render target pixels."));
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to read render target pixels."));
       return false;
     }
 
@@ -2727,7 +2692,7 @@ bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor
 
     if (!ReadRenderTargetPixels(RenderTarget, EComfyTexturesRenderTextureMode::Normals, Output.Normals))
     {
-      UE_LOG(LogTemp, Error, TEXT("Failed to read render target pixels."));
+      UE_LOG(LogComfyTextures, Error, TEXT("Failed to read render target pixels."));
       return false;
     }
 
@@ -2751,11 +2716,11 @@ void UComfyTexturesWidgetBase::ProcessSceneTextures(const TSharedPtr<TArray<FCom
 
   AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, TargetSize, Outputs, Mode, Callback]()
     {
+      double StartTime = FPlatformTime::Seconds();
+
       for (int Index = 0; Index < Outputs->Num(); Index++)
       {
         FComfyTexturesCaptureOutput& Output = (*Outputs)[Index];
-
-        // create the edit mask
 
         if (Mode == EComfyTexturesMode::Edit)
         {
@@ -2773,8 +2738,12 @@ void UComfyTexturesWidgetBase::ProcessSceneTextures(const TSharedPtr<TArray<FCom
         ResizeImage(Output.Depth, TargetSize, TargetSize);
         ResizeImage(Output.Normals, TargetSize, TargetSize);
       }
-      AsyncTask(ENamedThreads::GameThread, Callback);
 
+      double EndTime = FPlatformTime::Seconds();
+
+      UE_LOG(LogComfyTextures, Display, TEXT("Processed %d scene textures in %f seconds"), Outputs->Num(), EndTime - StartTime);
+
+      AsyncTask(ENamedThreads::GameThread, Callback);
     });
 }
 

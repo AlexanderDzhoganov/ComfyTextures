@@ -5,6 +5,7 @@
 #include "HttpModule.h"
 #include "Http.h"
 #include "WebSocketsModule.h"
+#include "ComfyTexturesWidgetBase.h"
 
 ComfyTexturesHttpClient::ComfyTexturesHttpClient(const FString& Url) :
   ClientId(FGuid::NewGuid().ToString()), BaseUrl(Url)
@@ -12,7 +13,7 @@ ComfyTexturesHttpClient::ComfyTexturesHttpClient(const FString& Url) :
   if (!FModuleManager::Get().IsModuleLoaded("WebSockets"))
   {
     FModuleManager::Get().LoadModule("WebSockets");
-    UE_LOG(LogTemp, Warning, TEXT("Loaded WebSockets module"));
+    UE_LOG(LogComfyTextures, Warning, TEXT("Loaded WebSockets module"));
   }
 }
 
@@ -32,7 +33,7 @@ void ComfyTexturesHttpClient::Connect()
   {
     if (WebSocket->IsConnected())
     {
-      UE_LOG(LogTemp, Warning, TEXT("Closing existing connection"));
+      UE_LOG(LogComfyTextures, Warning, TEXT("Closing existing connection"));
       WebSocket->Close();
     }
   }
@@ -57,7 +58,7 @@ void ComfyTexturesHttpClient::Connect()
 
   WebSocket->OnConnected().AddLambda([OnStateChanged]()
     {
-      UE_LOG(LogTemp, Warning, TEXT("Connected to ComfyUI"));
+      UE_LOG(LogComfyTextures, Warning, TEXT("Connected to ComfyUI"));
 
       if (OnStateChanged)
       {
@@ -69,8 +70,6 @@ void ComfyTexturesHttpClient::Connect()
 
   WebSocket->OnMessage().AddLambda([OnMessage](const FString& Message)
     {
-      UE_LOG(LogTemp, Warning, TEXT("Message received from ComfyUI: %s"), *Message);
-
       TSharedPtr<FJsonObject> JsonObj;
       TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Message);
 
@@ -83,13 +82,13 @@ void ComfyTexturesHttpClient::Connect()
       }
       else
       {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize JSON message from ComfyUI: %s"), *Message);
+        UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize JSON message from ComfyUI: %s"), *Message);
       }
     });
 
   WebSocket->OnConnectionError().AddLambda([OnStateChanged](const FString& Error)
     {
-      UE_LOG(LogTemp, Warning, TEXT("Error connecting to ComfyUI: %s"), *Error);
+      UE_LOG(LogComfyTextures, Warning, TEXT("Error connecting to ComfyUI: %s"), *Error);
 
       if (OnStateChanged)
       {
@@ -99,7 +98,7 @@ void ComfyTexturesHttpClient::Connect()
 
   WebSocket->OnClosed().AddLambda([OnStateChanged](int32 StatusCode, const FString& Reason, bool bWasClean)
     {
-      UE_LOG(LogTemp, Warning, TEXT("Connection to ComfyUI closed: %s"), *Reason);
+      UE_LOG(LogComfyTextures, Warning, TEXT("Connection to ComfyUI closed: %s"), *Reason);
 
       if (OnStateChanged)
       {
@@ -107,7 +106,7 @@ void ComfyTexturesHttpClient::Connect()
       }
     });
 
-  UE_LOG(LogTemp, Warning, TEXT("Connecting to ComfyUI at %s"), *WsUrl);
+  UE_LOG(LogComfyTextures, Warning, TEXT("Connecting to ComfyUI at %s"), *WsUrl);
   WebSocket->Connect();
 }
 
@@ -126,7 +125,7 @@ bool ComfyTexturesHttpClient::DoHttpGetRequest(const FString& Url, TFunction<voi
       {
         if (!bWasSuccessful || !Response.IsValid())
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to receive valid response"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to receive valid response"));
           Callback(nullptr, false);
           return;
         }
@@ -137,8 +136,8 @@ bool ComfyTexturesHttpClient::DoHttpGetRequest(const FString& Url, TFunction<voi
 
         if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogTemp, Warning, TEXT("%s"), *ResponseString);
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
           Callback(nullptr, false);
           return;
         }
@@ -159,7 +158,7 @@ bool ComfyTexturesHttpClient::DoHttpGetRequestRaw(const FString& Url, TFunction<
       {
         if (!bWasSuccessful || !Response.IsValid())
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to receive valid response"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to receive valid response"));
           Callback(TArray<uint8>(), false);
           return;
         }
@@ -183,7 +182,7 @@ bool ComfyTexturesHttpClient::DoHttpPostRequest(const FString& Url, const FStrin
       {
         if (!bWasSuccessful || !Response.IsValid())
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to receive valid response"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to receive valid response"));
           Callback(nullptr, false);
           return;
         }
@@ -194,8 +193,8 @@ bool ComfyTexturesHttpClient::DoHttpPostRequest(const FString& Url, const FStrin
 
         if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogTemp, Warning, TEXT("%s"), *ResponseString);
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
           Callback(nullptr, false);
           return;
         }
@@ -208,8 +207,6 @@ bool ComfyTexturesHttpClient::DoHttpPostRequest(const FString& Url, const FStrin
 
 bool ComfyTexturesHttpClient::DoHttpFileUpload(const FString& Url, const TArray64<uint8>& FileData, const FString& FileName, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const
 {
-  UE_LOG(LogTemp, Warning, TEXT("Uploading file to %s"), *Url);
-
   TSharedRef<IHttpRequest> HttpRequest = FHttpModule::Get().CreateRequest();
   HttpRequest->SetVerb("POST");
   HttpRequest->SetURL(BaseUrl + "/" + Url);
@@ -254,7 +251,7 @@ bool ComfyTexturesHttpClient::DoHttpFileUpload(const FString& Url, const TArray6
       {
         if (!bWasSuccessful || !Response.IsValid())
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to receive valid response"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to receive valid response"));
           Callback(nullptr, false);
           return;
         }
@@ -265,8 +262,8 @@ bool ComfyTexturesHttpClient::DoHttpFileUpload(const FString& Url, const TArray6
 
         if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
         {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogTemp, Warning, TEXT("%s"), *ResponseString);
+          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
+          UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
           Callback(nullptr, false);
           return;
         }

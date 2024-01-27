@@ -9,6 +9,8 @@
 #include "ComfyTexturesHttpClient.h"
 #include "ComfyTexturesWidgetBase.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogComfyTextures, Log, All);
+
 UENUM(BlueprintType)
 enum class EComfyTexturesState : uint8
 {
@@ -56,9 +58,7 @@ UENUM(BlueprintType)
 enum class EComfyTexturesCameraMode : uint8
 {
   EditorCamera,
-  ExistingCamera,
-  EightSides,
-  Orbit,
+  ExistingCamera
 };
 
 UCLASS(config = Game, defaultconfig)
@@ -69,6 +69,9 @@ class UComfyTexturesSettings : public UObject
   public:
   UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "ComfyUI URL", ToolTip = "URL of your ComfyUI server, leave as is if running locally"))
   FString ComfyUrl = "http://127.0.0.1:8188";
+
+  UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "Limit Editor FPS", ToolTip = "Limit the editor frames per second while rendering"))
+  bool bLimitEditorFps = true;
 
   UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "Min. Texture Size", ToolTip = "Minimum texture size for generated textures, should be a power of 2"))
   int MinTextureSize = 64;
@@ -134,6 +137,10 @@ struct FComfyTexturesRenderData
   int OutputWidth;
 
   int OutputHeight;
+  
+  bool bPreserveExisting;
+
+  float PreserveThreshold;
 };
 
 USTRUCT(BlueprintType)
@@ -190,13 +197,7 @@ struct FComfyTexturesRenderOptions
   ACameraActor* ExistingCamera;
 
   UPROPERTY(BlueprintReadWrite)
-  int OrbitSteps;
-
-  UPROPERTY(BlueprintReadWrite)
-  float OrbitHeight;
-
-  UPROPERTY(BlueprintReadWrite)
-  float CameraFov;
+  bool bPreserveExisting;
 
   FString DepthImageFilename;
 
