@@ -251,6 +251,8 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   GENERATED_BODY()
 
   public:
+  using FComfyTexturesRenderDataPtr = TSharedPtr<FComfyTexturesRenderData>;
+
   UPROPERTY(BlueprintReadOnly, Category = "ComfyTextures")
   EComfyTexturesState State = EComfyTexturesState::Disconnected;
 
@@ -297,9 +299,6 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   void FreeComfyMemory(bool bUnloadModels);
 
   UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
-  bool ReadTextFile(FString FilePath, FString& OutText) const;
-
-  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
   bool PrepareActors(const TArray<AActor*>& Actor, const FComfyTexturesPrepareOptions& PrepareOpts);
 
   UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
@@ -330,7 +329,7 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   TUniquePtr<ComfyTexturesHttpClient> HttpClient;
 
   // data for all render requests
-  TMap<int, FComfyTexturesRenderData> RenderData;
+  TMap<int, FComfyTexturesRenderDataPtr> RenderQueue;
 
   // request index to prompt id mapping
   TMap<FString, int> PromptIdToRequestIndex;
@@ -346,6 +345,8 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
 
   private:
   FString GetBaseUrl() const;
+
+  bool ProcessRenderResultForActor(AActor* Actor, TFunction<void(bool)> Callback);
 
   void HandleRenderStateChanged(const FComfyTexturesRenderData& Data);
 

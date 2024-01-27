@@ -81,9 +81,9 @@ int UComfyTexturesWidgetBase::GetNumPendingRequests() const
 {
   int NumPendingRequests = 0;
 
-  for (const TPair<int, FComfyTexturesRenderData>& Pair : RenderData)
+  for (const TPair<int, FComfyTexturesRenderDataPtr>& Pair : RenderQueue)
   {
-    if (Pair.Value.State == EComfyTexturesRenderState::Pending)
+    if (Pair.Value->State == EComfyTexturesRenderState::Pending)
     {
       NumPendingRequests++;
     }
@@ -99,14 +99,14 @@ bool UComfyTexturesWidgetBase::HasPendingRequests() const
 
 bool UComfyTexturesWidgetBase::ValidateAllRequestsSucceeded() const
 {
-  for (const TPair<int, FComfyTexturesRenderData>& Pair : RenderData)
+  for (const TPair<int, FComfyTexturesRenderDataPtr>& Pair : RenderQueue)
   {
-    if (Pair.Value.State != EComfyTexturesRenderState::Finished)
+    if (Pair.Value->State != EComfyTexturesRenderState::Finished)
     {
       return false;
     }
 
-    if (Pair.Value.OutputFileNames.Num() == 0)
+    if (Pair.Value->OutputFileNames.Num() == 0)
     {
       return false;
     }
@@ -138,7 +138,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
   State = EComfyTexturesState::Rendering;
   OnStateChanged(State);
 
-  RenderData.Empty();
+  RenderQueue.Empty();
   PromptIdToRequestIndex.Empty();
   ActorSet = Actors;
 
@@ -309,16 +309,16 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
           return;
         }
 
-        FComfyTexturesRenderData& Data = RenderData[RequestIndex];
-        Data.ViewInfo = ViewInfo;
-
         TOptional<FMatrix> CustomProjectionMatrix;
         FMatrix ViewMatrix, ProjectionMatrix, ViewProjectionMatrix;
-        UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(Data.ViewInfo, CustomProjectionMatrix,
+        UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(ViewInfo, CustomProjectionMatrix,
           ViewMatrix, ProjectionMatrix, ViewProjectionMatrix);
-        Data.ViewMatrix = ViewMatrix;
-        Data.ProjectionMatrix = ProjectionMatrix;
-        Data.RawDepth = RawDepth;
+
+        const FComfyTexturesRenderDataPtr& Data = RenderQueue[RequestIndex];
+        Data->ViewInfo = ViewInfo;
+        Data->ViewMatrix = ViewMatrix;
+        Data->ProjectionMatrix = ProjectionMatrix;
+        Data->RawDepth = RawDepth;
       });
 
     if (!bSuccess)
@@ -471,12 +471,6 @@ static void RasterizeTriangle(FVector2D V0, FVector2D V1, FVector2D V2, int Widt
   int MaxX = FMath::CeilToInt(FMath::Min(FMath::Max3(V0.X, V1.X, V2.X), Width - 1));
   int MaxY = FMath::CeilToInt(FMath::Min(FMath::Max3(V0.Y, V1.Y, V2.Y), Height - 1));
 
-  // Edge functions
-  auto Edge = [](const FVector2D& A, const FVector2D& B, const FVector2D& C)
-    {
-      return (C.X - A.X) * (B.Y - A.Y) - (C.Y - A.Y) * (B.X - A.X);
-    };
-
   for (int Y = MinY; Y <= MaxY; Y++)
   {
     for (int X = MinX; X <= MaxX; X++)
@@ -492,7 +486,7 @@ static void RasterizeTriangle(FVector2D V0, FVector2D V1, FVector2D V2, int Widt
   }
 }
 
-static bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTexturesRenderData>& RenderData, TFunction<void(bool)> Callback)
+bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunction<void(bool)> Callback)
 {
   const FTransform& ActorTransform = Actor->GetActorTransform();
 
@@ -563,61 +557,74 @@ static bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTex
   // Access the LOD (Level of Detail) data of the mesh
   const FStaticMeshLODResources& MeshLod = StaticMesh->GetLODForExport(0);
 
-  // Access the index buffer
-  TArray<uint32> Indices;
-  MeshLod.IndexBuffer.GetCopy(Indices);
+  struct SharedData
+  {
+    TArray<uint32> Indices;
+    TArray<FVector> Vertices;
+    TArray<FVector2D> Uvs;
+    FComfyTexturesRenderDataPtr RenderData;
+    FTransform ActorTransform;
+    int TextureWidth;
+    int TextureHeight;
+    UTexture2D* Texture2D;
+  };
+
+  TSharedPtr<SharedData> StateData = MakeShared<SharedData>();
+  StateData->RenderData = RenderQueue.begin().Value();
+  StateData->ActorTransform = ActorTransform;
+  StateData->TextureWidth = TextureWidth;
+  StateData->TextureHeight = TextureHeight;
+  StateData->Texture2D = Texture2D;
+
+  MeshLod.IndexBuffer.GetCopy(StateData->Indices);
 
   int VertexCount = MeshLod.VertexBuffers.PositionVertexBuffer.GetNumVertices();
-
-  TArray<FVector> Vertices;
-  Vertices.SetNumUninitialized(VertexCount);
-
-  TArray<FVector2D> Uvs;
-  Uvs.SetNumUninitialized(VertexCount);
+  StateData->Vertices.SetNumUninitialized(VertexCount);
+  StateData->Uvs.SetNumUninitialized(VertexCount);
 
   for (int32 VertexIndex = 0; VertexIndex < VertexCount; VertexIndex++)
   {
     FVector Vertex = (FVector)MeshLod.VertexBuffers.PositionVertexBuffer.VertexPosition(VertexIndex);
-    Vertices[VertexIndex] = Vertex;
+    StateData->Vertices[VertexIndex] = Vertex;
 
     FVector2D Uv = (FVector2D)MeshLod.VertexBuffers.StaticMeshVertexBuffer.GetVertexUV(VertexIndex, 0);
-    Uvs[VertexIndex] = Uv;
+    StateData->Uvs[VertexIndex] = Uv;
   }
 
   // get the first item from RenderData TMap
-  const FComfyTexturesRenderData& Data = RenderData.begin().Value();
-  const FMinimalViewInfo& ViewInfo = Data.ViewInfo;
-  const FMatrix& ViewMatrix = Data.ViewMatrix;
-  const FMatrix& ProjectionMatrix = Data.ProjectionMatrix;
 
-  AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [=]()
+  AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [StateData, Callback]()
     {
-      FMatrix ViewProjectionMatrix = ViewMatrix * ProjectionMatrix;
-      FIntRect ViewRect(0, 0, Data.OutputWidth, Data.OutputHeight);
+      const FMinimalViewInfo& ViewInfo = StateData->RenderData->ViewInfo;
+      const FMatrix& ViewMatrix = StateData->RenderData->ViewMatrix;
+      const FMatrix& ProjectionMatrix = StateData->RenderData->ProjectionMatrix;
 
-      TArray<FColor> Pixels;
-      Pixels.SetNumZeroed(TextureWidth * TextureHeight);
+      FMatrix ViewProjectionMatrix = ViewMatrix * ProjectionMatrix;
+      FIntRect ViewRect(0, 0, StateData->RenderData->OutputWidth, StateData->RenderData->OutputHeight);
+
+      TSharedPtr<TArray<FColor>> Pixels = MakeShared<TArray<FColor>>();
+      Pixels->SetNumZeroed(StateData->TextureWidth * StateData->TextureHeight);
 
       // Iterate over the faces
-      for (int32 FaceIndex = 0; FaceIndex < Indices.Num(); FaceIndex += 3)
+      for (int32 FaceIndex = 0; FaceIndex < StateData->Indices.Num(); FaceIndex += 3)
       {
         // Each face is represented by 3 indices
-        uint32 Index0 = Indices[FaceIndex];
-        uint32 Index1 = Indices[FaceIndex + 1];
-        uint32 Index2 = Indices[FaceIndex + 2];
+        uint32 Index0 = StateData->Indices[FaceIndex];
+        uint32 Index1 = StateData->Indices[FaceIndex + 1];
+        uint32 Index2 = StateData->Indices[FaceIndex + 2];
 
         // get the vertices of the face
-        const FVector& Vertex0 = Vertices[Index0];
-        const FVector& Vertex1 = Vertices[Index1];
-        const FVector& Vertex2 = Vertices[Index2];
+        const FVector& Vertex0 = StateData->Vertices[Index0];
+        const FVector& Vertex1 = StateData->Vertices[Index1];
+        const FVector& Vertex2 = StateData->Vertices[Index2];
 
         FVector FaceNormal = -FVector::CrossProduct(Vertex1 - Vertex0, Vertex2 - Vertex0).GetSafeNormal();
-        FVector FaceNormalWorld = ActorTransform.TransformVector(FaceNormal);
+        FVector FaceNormalWorld = StateData->ActorTransform.TransformVector(FaceNormal);
 
         float Dot = 0.0f;
         if (ViewInfo.ProjectionMode == ECameraProjectionMode::Perspective)
         {
-          FVector Vertex0World = ActorTransform.TransformPosition(Vertex0);
+          FVector Vertex0World = StateData->ActorTransform.TransformPosition(Vertex0);
           Dot = FVector::DotProduct(FaceNormalWorld, (ViewInfo.Location - Vertex0World).GetSafeNormal());
         }
         else if (ViewInfo.ProjectionMode == ECameraProjectionMode::Orthographic)
@@ -633,21 +640,21 @@ static bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTex
         }
 
         // get the UVs of the face
-        const FVector2D& Uv0 = Uvs[Index0];
-        const FVector2D& Uv1 = Uvs[Index1];
-        const FVector2D& Uv2 = Uvs[Index2];
+        const FVector2D& Uv0 = StateData->Uvs[Index0];
+        const FVector2D& Uv1 = StateData->Uvs[Index1];
+        const FVector2D& Uv2 = StateData->Uvs[Index2];
 
-        RasterizeTriangle(Uv0, Uv1, Uv2, TextureWidth, TextureHeight, [&](int X, int Y, const FVector& Barycentric)
+        RasterizeTriangle(Uv0, Uv1, Uv2, StateData->TextureWidth, StateData->TextureHeight, [&](int X, int Y, const FVector& Barycentric)
           {
-            int PixelIndex = X + Y * TextureWidth;
-            if (PixelIndex < 0 || PixelIndex >= Pixels.Num())
+            int PixelIndex = X + Y * StateData->TextureWidth;
+            if (PixelIndex < 0 || PixelIndex >= Pixels->Num())
             {
               return;
             }
 
             // find the local position of the pixel
             FVector LocalPosition = Barycentric.X * Vertex0 + Barycentric.Y * Vertex1 + Barycentric.Z * Vertex2;
-            FVector WorldPosition = ActorTransform.TransformPosition(LocalPosition);
+            FVector WorldPosition = StateData->ActorTransform.TransformPosition(LocalPosition);
 
             // project the world position to screen space
             FPlane Result = ViewProjectionMatrix.TransformFVector4(FVector4(WorldPosition, 1.f));
@@ -672,11 +679,13 @@ static bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTex
               return;
             }
 
-            // calculate the pixel coordinates
-            int PixelX = FMath::FloorToInt(Uv.X * (Data.RawDepth.Width - 1));
-            int PixelY = FMath::FloorToInt(Uv.Y * (Data.RawDepth.Height - 1));
+            const FComfyTexturesImageData& RawDepth = StateData->RenderData->RawDepth;
 
-            float ClosestDepth = Data.RawDepth.Pixels[PixelX + PixelY * Data.RawDepth.Width].R;
+            // calculate the pixel coordinates
+            int PixelX = FMath::FloorToInt(Uv.X * (RawDepth.Width - 1));
+            int PixelY = FMath::FloorToInt(Uv.Y * (RawDepth.Height - 1));
+
+            float ClosestDepth = RawDepth.Pixels[PixelX + PixelY * RawDepth.Width].R;
 
             if (ViewInfo.ProjectionMode == ECameraProjectionMode::Perspective)
             {
@@ -685,7 +694,7 @@ static bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTex
               float Eps = 5.0f;
               if (ViewSpacePoint.Z > ClosestDepth + Eps)
               {
-                Pixels[PixelIndex] = FColor(0, 0, 0, 255);//FColor(255, 0, 255, 255);
+                (*Pixels)[PixelIndex] = FColor(0, 0, 0, 255);//FColor(255, 0, 255, 255);
                 return;
               }
             }
@@ -698,37 +707,38 @@ static bool ProcessRenderResultForActor(AActor* Actor, const TMap<int, FComfyTex
               float Eps = 0.01f;
               if (PosInScreenSpace.Z < DepthInNdc - Eps)
               {
-                Pixels[PixelIndex] = FColor(0, 0, 0, 255);//FColor(255, 0, 255, 255);
+                (*Pixels)[PixelIndex] = FColor(0, 0, 0, 255);//FColor(255, 0, 255, 255);
                 return;
               }
             }
 
             // get the pixel color from the input texture
-            FLinearColor Pixel = SampleBilinear(Data.OutputPixels, Data.OutputWidth, Data.OutputHeight, Uv);
+            FLinearColor Pixel = SampleBilinear(StateData->RenderData->OutputPixels, StateData->RenderData->OutputWidth,
+              StateData->RenderData->OutputHeight, Uv);
             Pixel *= 255.0f;
-            Pixels[PixelIndex] = FColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
+            (*Pixels)[PixelIndex] = FColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
           });
       }
 
-      ExpandTextureIslands(Pixels, TextureWidth, TextureHeight, 4);
+      ExpandTextureIslands(*Pixels, StateData->TextureWidth, StateData->TextureHeight, 4);
 
-      AsyncTask(ENamedThreads::GameThread, [=]()
+      AsyncTask(ENamedThreads::GameThread, [StateData, Pixels, Callback]()
         {
-          UKismetSystemLibrary::TransactObject(Texture2D);
+          UKismetSystemLibrary::TransactObject(StateData->Texture2D);
 
-          FColor* MipData = (FColor*)Texture2D->Source.LockMip(0);
+          FColor* MipData = (FColor*)StateData->Texture2D->Source.LockMip(0);
           if (MipData == nullptr)
           {
-            UE_LOG(LogTemp, Error, TEXT("Failed to lock mip 0 for texture %s."), *Texture2D->GetName());
+            UE_LOG(LogTemp, Error, TEXT("Failed to lock mip 0 for texture %s."), *(StateData->Texture2D->GetName()));
             Callback(false);
             return false;
           }
 
-          FMemory::Memcpy(MipData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
+          FMemory::Memcpy(MipData, Pixels->GetData(), Pixels->Num() * sizeof(FColor));
 
-          Texture2D->Source.UnlockMip(0);
-          Texture2D->MarkPackageDirty();
-          Texture2D->UpdateResource();
+          StateData->Texture2D->Source.UnlockMip(0);
+          StateData->Texture2D->MarkPackageDirty();
+          StateData->Texture2D->UpdateResource();
 
           Callback(true);
           return true;
@@ -749,7 +759,7 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
     return false;
   }
 
-  if (RenderData.Num() == 0)
+  if (RenderQueue.Num() == 0)
   {
     UE_LOG(LogTemp, Warning, TEXT("No requests to process"));
     TransitionToIdleState();
@@ -772,20 +782,19 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
         return;
       }
 
-      static TAtomic<int> PendingResults;
-      PendingResults = 0;
+      TSharedPtr<int32> NumPending = MakeShared<int32>();
 
       for (AActor* Actor : ActorSet)
       {
-        if (ProcessRenderResultForActor(Actor, RenderData, [&](bool bSuccess)
+        if (ProcessRenderResultForActor(Actor, [&, NumPending](bool bSuccess)
           {
             if (!bSuccess)
             {
               UE_LOG(LogTemp, Warning, TEXT("Failed to process render result for actor %s"), *Actor->GetName());
             }
 
-            PendingResults--;
-            if (PendingResults == 0)
+            (*NumPending)--;
+            if (*NumPending == 0)
             {
               if (UKismetSystemLibrary::EndTransaction() != -1)
               {
@@ -798,13 +807,23 @@ bool UComfyTexturesWidgetBase::ProcessRenderResults()
             return true;
           }))
         {
-          PendingResults++;
+          (*NumPending)++;
         }
       }
 
-      State = EComfyTexturesState::Processing;
-      OnStateChanged(State);
+      if (*NumPending == 0)
+      {
+        if (UKismetSystemLibrary::EndTransaction() != -1)
+        {
+          UE_LOG(LogTemp, Warning, TEXT("Failed to end transaction"));
+        }
+
+        TransitionToIdleState();
+      }
     });
+
+  State = EComfyTexturesState::Processing;
+  OnStateChanged(State);
 
   return true;
 }
@@ -1042,7 +1061,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
   SetNodeInputProperty(*Workflow, "input_mask", "image", RenderOpts.MaskImageFilename);
   SetNodeInputProperty(*Workflow, "input_edge", "image", RenderOpts.EdgeMaskImageFilename);
 
-  TSharedPtr<FJsonObject> RequestBody = MakeShareable(new FJsonObject);
+  TSharedPtr<FJsonObject> RequestBody = MakeShared<FJsonObject>();
   RequestBody->SetStringField("client_id", HttpClient->ClientId);
   RequestBody->SetObjectField("prompt", Workflow);
 
@@ -1053,7 +1072,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
   UE_LOG(LogTemp, Warning, TEXT("Sending render request: %s"), *RequestBodyString);
 
   RequestIndex = NextRequestIndex++;
-  RenderData.Add(RequestIndex, FComfyTexturesRenderData());
+  RenderQueue.Add(RequestIndex, MakeShared<FComfyTexturesRenderData>());
 
   TWeakObjectPtr<UComfyTexturesWidgetBase> WeakThis(this);
 
@@ -1065,7 +1084,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
       }
 
       UComfyTexturesWidgetBase* This = WeakThis.Get();
-      FComfyTexturesRenderData& Data = This->RenderData[RequestIndex];
+      FComfyTexturesRenderData& Data = *This->RenderQueue[RequestIndex];
 
       if (!bWasSuccessful)
       {
@@ -1102,7 +1121,7 @@ void UComfyTexturesWidgetBase::InterruptRender() const
     return;
   }
 
-  TSharedPtr<FJsonObject> RequestBody = MakeShareable(new FJsonObject);
+  TSharedPtr<FJsonObject> RequestBody = MakeShared<FJsonObject>();
 
   FString RequestBodyString;
   TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
@@ -1130,7 +1149,7 @@ void UComfyTexturesWidgetBase::ClearRenderQueue()
     return;
   }
 
-  TSharedPtr<FJsonObject> RequestBody = MakeShareable(new FJsonObject);
+  TSharedPtr<FJsonObject> RequestBody = MakeShared<FJsonObject>();
   RequestBody->SetBoolField("clear", true);
 
   FString RequestBodyString;
@@ -1164,7 +1183,7 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
 
   if (bUnloadModels)
   {
-    RequestBody = MakeShareable(new FJsonObject);
+    RequestBody = MakeShared<FJsonObject>();
     RequestBody->SetBoolField("free_memory", true);
     RequestBody->SetBoolField("unload_models", true);
 
@@ -1185,7 +1204,7 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
       });
   }
 
-  RequestBody = MakeShareable(new FJsonObject);
+  RequestBody = MakeShared<FJsonObject>();
   RequestBody->SetBoolField("clear", true);
 
   RequestBodyString = "";
@@ -1204,11 +1223,6 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
 
       UE_LOG(LogTemp, Warning, TEXT("History clear request successful"));
     });
-}
-
-bool UComfyTexturesWidgetBase::ReadTextFile(FString FilePath, FString& OutText) const
-{
-  return FFileHelper::LoadFileToString(OutText, *FilePath);
 }
 
 bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, const FComfyTexturesPrepareOptions& PrepareOpts)
@@ -1561,11 +1575,11 @@ bool UComfyTexturesWidgetBase::SaveParams()
   FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
   FString ConfigPath = FPaths::Combine(PluginFolderPath, TEXT("WidgetParams.json"));
 
-  TSharedPtr<FJsonObject> ParamsObject = MakeShareable(new FJsonObject);
+  TSharedPtr<FJsonObject> ParamsObject = MakeShared<FJsonObject>();
 
   for (const TPair<EComfyTexturesMode, FComfyTexturesWorkflowParams>& Pair : Params)
   {
-    TSharedPtr<FJsonObject> ParamObject = MakeShareable(new FJsonObject);
+    TSharedPtr<FJsonObject> ParamObject = MakeShared<FJsonObject>();
 
     ParamObject->SetStringField("positive_prompt", Pair.Value.PositivePrompt);
     ParamObject->SetStringField("negative_prompt", Pair.Value.NegativePrompt);
@@ -1677,13 +1691,13 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
   }
 
   int RequestIndex = PromptIdToRequestIndex[PromptId];
-  if (!RenderData.Contains(RequestIndex))
+  if (!RenderQueue.Contains(RequestIndex))
   {
     UE_LOG(LogTemp, Warning, TEXT("Received websocket message for unknown request index: %d"), RequestIndex);
     return;
   }
 
-  FComfyTexturesRenderData& Data = RenderData[RequestIndex];
+  FComfyTexturesRenderData& Data = *RenderQueue[RequestIndex];
 
   if (MessageType == "execution_start")
   {
@@ -2427,16 +2441,17 @@ void UComfyTexturesWidgetBase::LoadRenderResultImages(TFunction<void(bool)> Call
     FThreadSafeBool bAllSuccessful = true;
   };
   TSharedPtr<SharedState> StateData = MakeShared<SharedState>();
-  StateData->RemainingTasks = RenderData.Num();
+  StateData->RemainingTasks = RenderQueue.Num();
 
-  for (TPair<int, FComfyTexturesRenderData>& Pair : RenderData)
+  for (TPair<int, FComfyTexturesRenderDataPtr>& Pair : RenderQueue)
   {
     int Index = Pair.Key;
-    FComfyTexturesRenderData& Data = Pair.Value;
+    FComfyTexturesRenderDataPtr RenderData = Pair.Value;
 
-    Async(EAsyncExecution::ThreadPool, [this, FileName = Data.OutputFileNames[0], StateData, Index, Callback]()
+    Async(EAsyncExecution::ThreadPool, [this, StateData, RenderData, Callback]()
       {
-        bool bSuccess = DownloadImage(FileName, [this, FileName, StateData, Index, Callback](TArray<FColor> Pixels, int Width, int Height, bool bWasSuccessful)
+        FString FileName = RenderData->OutputFileNames[0];
+        bool bSuccess = DownloadImage(FileName, [this, FileName, StateData, RenderData, Callback](TArray<FColor> Pixels, int Width, int Height, bool bWasSuccessful)
           {
             if (!bWasSuccessful)
             {
@@ -2445,9 +2460,9 @@ void UComfyTexturesWidgetBase::LoadRenderResultImages(TFunction<void(bool)> Call
             }
             else
             {
-              RenderData[Index].OutputPixels = Pixels;
-              RenderData[Index].OutputWidth = Width;
-              RenderData[Index].OutputHeight = Height;
+              RenderData->OutputPixels = Pixels;
+              RenderData->OutputWidth = Width;
+              RenderData->OutputHeight = Height;
             }
 
             // Check if this is the last task
@@ -2474,7 +2489,7 @@ void UComfyTexturesWidgetBase::LoadRenderResultImages(TFunction<void(bool)> Call
 
 void UComfyTexturesWidgetBase::TransitionToIdleState()
 {
-  RenderData.Empty();
+  RenderQueue.Empty();
   PromptIdToRequestIndex.Empty();
   ActorSet.Empty();
 
