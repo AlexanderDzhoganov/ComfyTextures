@@ -364,8 +364,6 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
 
   bool DownloadImage(const FString& FileName, TFunction<void(TArray<FColor>, int, int, bool)> Callback) const;
 
-  bool GenerateMipMaps(UTexture2D* Texture) const;
-
   bool CalculateApproximateScreenBounds(AActor* Actor, const FMinimalViewInfo& ViewInfo, FBox2D& OutBounds) const;
 
   UTexture2D* CreateTexture2D(int Width, int Height, const TArray<FColor>& Pixels) const;
@@ -375,10 +373,6 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   void CreateEditMaskFromImage(const TArray<FLinearColor>& Pixels, TArray<FLinearColor>& OutPixels) const;
 
   void CreateEdgeMask(const FComfyTexturesImageData& Depth, const FComfyTexturesImageData& Normals, FComfyTexturesImageData& OutEdgeMask) const;
-
-  float ComputeDepthGradient(const FComfyTexturesImageData& Image, int X, int Y) const;
-
-  float ComputeNormalsGradient(const FComfyTexturesImageData& Image, int X, int Y) const;
 
   void LoadRenderResultImages(TFunction<void(bool)> Callback);
 

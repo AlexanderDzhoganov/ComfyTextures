@@ -876,7 +876,7 @@ static TArray<TSharedPtr<FJsonObject>> FindNodesByTitle(const FJsonObject& Workf
   return Nodes;
 }
 
-void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, double Value)
+static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, double Value)
 {
   TArray<TSharedPtr<FJsonObject>> Nodes = FindNodesByTitle(Workflow, NodeName);
 
@@ -891,7 +891,7 @@ void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const 
   }
 }
 
-void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, int Value)
+static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, int Value)
 {
   TArray<TSharedPtr<FJsonObject>> Nodes = FindNodesByTitle(Workflow, NodeName);
 
@@ -906,7 +906,7 @@ void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const 
   }
 }
 
-void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, const FString& Value)
+static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, const FString& Value)
 {
   TArray<TSharedPtr<FJsonObject>> Nodes = FindNodesByTitle(Workflow, NodeName);
 
@@ -928,7 +928,7 @@ void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const 
   }
 }
 
-bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, int& OutValue)
+static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, int& OutValue)
 {
   TArray<TSharedPtr<FJsonObject>> Nodes = FindNodesByTitle(Workflow, NodeName);
 
@@ -950,7 +950,7 @@ bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const 
   return false;
 }
 
-bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, FString& OutValue)
+static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, FString& OutValue)
 {
   TArray<TSharedPtr<FJsonObject>> Nodes = FindNodesByTitle(Workflow, NodeName);
 
@@ -972,7 +972,7 @@ bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const 
   return false;
 }
 
-bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, float& OutValue)
+static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName, const FString& PropertyName, float& OutValue)
 {
   TArray<TSharedPtr<FJsonObject>> Nodes = FindNodesByTitle(Workflow, NodeName);
 
@@ -1307,6 +1307,8 @@ bool UComfyTexturesWidgetBase::PrepareActors(const TArray<AActor*>& Actors, cons
       continue;
     }
 
+    UE_LOG(LogTemp, Warning, TEXT("Actor %s screen bounds: %s."), *Actor->GetName(), *ActorScreenBounds.ToString());
+
     FVector2D SizeOnScreen = ActorScreenBounds.GetSize();
     float LargerSize = FMath::Max(SizeOnScreen.X, SizeOnScreen.Y);
 
@@ -1452,7 +1454,7 @@ void UComfyTexturesWidgetBase::SetEditorFrameRate(int Fps)
   GEditor->SetMaxFPS(Fps);
 }
 
-void GetChildActorsRecursive(AActor* Actor, TSet<AActor*>& OutActors)
+static void GetChildActorsRecursive(AActor* Actor, TSet<AActor*>& OutActors)
 {
   if (Actor == nullptr)
   {
@@ -2067,75 +2069,6 @@ bool UComfyTexturesWidgetBase::DownloadImage(const FString& FileName, TFunction<
     });
 }
 
-bool UComfyTexturesWidgetBase::GenerateMipMaps(UTexture2D* Texture) const
-{
-  if (!Texture || !Texture->GetPlatformData() || Texture->GetPlatformData()->Mips.Num() == 0)
-  {
-    return false;
-  }
-
-  FTexture2DMipMap* Mip0 = &Texture->GetPlatformData()->Mips[0];
-  int32 SrcWidth = Mip0->SizeX;
-  int32 SrcHeight = Mip0->SizeY;
-
-  // if theres more than one mip, delete all but the first
-
-  if (Texture->GetPlatformData()->Mips.Num() > 1)
-  {
-    for (int32 MipIndex = 1; MipIndex < Texture->GetPlatformData()->Mips.Num(); ++MipIndex)
-    {
-      FTexture2DMipMap* Mip = &Texture->GetPlatformData()->Mips[MipIndex];
-      Mip->BulkData.RemoveBulkData();
-    }
-
-    // remove all but the first mip
-    for (int32 MipIndex = Texture->GetPlatformData()->Mips.Num() - 1; MipIndex > 0; --MipIndex)
-    {
-      // free the mip data
-      FTexture2DMipMap* Mip = &Texture->GetPlatformData()->Mips[MipIndex];
-      Mip->BulkData.RemoveBulkData();
-
-      // remove the mip from the array
-      Texture->GetPlatformData()->Mips.RemoveAt(MipIndex);
-    }
-  }
-
-  TArray<FColor> SrcData;
-  SrcData.AddUninitialized(SrcWidth * SrcHeight);
-  FMemory::Memcpy(SrcData.GetData(), Mip0->BulkData.Lock(LOCK_READ_ONLY), SrcWidth * SrcHeight * 4);
-  Mip0->BulkData.Unlock();
-
-  for (int32 MipIndex = 1; SrcWidth > 1 || SrcHeight > 1; ++MipIndex)
-  {
-    SrcWidth = FMath::Max(SrcWidth / 2, 1);
-    SrcHeight = FMath::Max(SrcHeight / 2, 1);
-
-    TArray<FColor> NewMipData;
-    NewMipData.AddUninitialized(SrcWidth * SrcHeight);
-
-    FImageUtils::ImageResize(SrcWidth * 2, SrcHeight * 2, TArrayView<const FColor>(SrcData), SrcWidth, SrcHeight, TArrayView<FColor>(NewMipData), false);
-
-    FTexture2DMipMap* NewMip = new FTexture2DMipMap();
-    NewMip->SizeX = SrcWidth;
-    NewMip->SizeY = SrcHeight;
-
-    NewMip->BulkData.Lock(LOCK_READ_WRITE);
-    NewMip->BulkData.Realloc(SrcWidth * SrcHeight * 4);
-    NewMip->BulkData.Unlock();
-
-    FMemory::Memcpy(NewMip->BulkData.Lock(LOCK_READ_WRITE), NewMipData.GetData(), SrcWidth * SrcHeight * 4);
-    NewMip->BulkData.Unlock();
-
-    Texture->GetPlatformData()->Mips.Add(NewMip);
-
-    SrcData = MoveTemp(NewMipData);
-  }
-
-  Texture->UpdateResource();
-
-  return true;
-}
-
 // calculate the approximate screen bounds of an actor using the actor bounds and the camera view info
 bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, const FMinimalViewInfo& ViewInfo, FBox2D& OutBounds) const
 {
@@ -2145,10 +2078,8 @@ bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, c
     return false;
   }
 
-  FBox ActorBounds = Actor->GetComponentsBoundingBox();
-  FVector ActorCenter = ActorBounds.GetCenter();
+  FBox ActorBounds = Actor->GetComponentsBoundingBox(true);
   FVector ActorExtent = ActorBounds.GetExtent();
-  FTransform ActorTransform = Actor->GetTransform();
 
   FVector Corners[8];
   Corners[0] = FVector(ActorExtent.X, ActorExtent.Y, ActorExtent.Z);
@@ -2160,9 +2091,10 @@ bool UComfyTexturesWidgetBase::CalculateApproximateScreenBounds(AActor* Actor, c
   Corners[6] = FVector(-ActorExtent.X, -ActorExtent.Y, ActorExtent.Z);
   Corners[7] = FVector(-ActorExtent.X, -ActorExtent.Y, -ActorExtent.Z);
 
+  FVector ActorCenter = ActorBounds.GetCenter();
   for (int CornerIndex = 0; CornerIndex < 8; CornerIndex++)
   {
-    Corners[CornerIndex] = ActorTransform.TransformPosition(ActorCenter + Corners[CornerIndex]);
+    Corners[CornerIndex] = ActorCenter + Corners[CornerIndex];
   }
 
   TOptional<FMatrix> CustomProjectionMatrix;
@@ -2247,15 +2179,6 @@ UTexture2D* UComfyTexturesWidgetBase::CreateTexture2D(int Width, int Height, con
 
   Texture2D->SetPlatformData(PlatformData);
   Texture2D->UpdateResource();
-
-  if (GenerateMipMaps(Texture2D))
-  {
-    UE_LOG(LogTemp, Warning, TEXT("Generated mipmaps for texture %s"), *Texture2D->GetName());
-  }
-  else
-  {
-    UE_LOG(LogTemp, Warning, TEXT("Failed to generate mipmaps for texture %s"), *Texture2D->GetName());
-  }
 
   Texture2D->Source.Init(Width, Height, 1, PlatformData->Mips.Num(), ETextureSourceFormat::TSF_BGRA8, nullptr);
 
@@ -2348,40 +2271,7 @@ void UComfyTexturesWidgetBase::CreateEditMaskFromImage(const TArray<FLinearColor
   }
 }
 
-void UComfyTexturesWidgetBase::CreateEdgeMask(const FComfyTexturesImageData& Depth, const FComfyTexturesImageData& Normals, FComfyTexturesImageData& OutEdgeMask) const
-{
-  if (Depth.Width != Normals.Width || Depth.Height != Normals.Height)
-  {
-    UE_LOG(LogTemp, Error, TEXT("Depth and normals images have different dimensions."));
-    return;
-  }
-
-  // perform edge detection on the depth and normals images
-  OutEdgeMask.Width = Depth.Width;
-  OutEdgeMask.Height = Depth.Height;
-  OutEdgeMask.Pixels.SetNumUninitialized(Depth.Pixels.Num());
-
-  // Assuming Depth and Normals are of the same dimensions
-  for (int Y = 0; Y < Depth.Height; Y++)
-  {
-    for (int X = 0; X < Depth.Width; X++)
-    {
-      // Compute depth gradient
-      float DepthGradient = ComputeDepthGradient(Depth, X, Y);
-
-      // Compute normals gradient
-      float NormalsGradient = ComputeNormalsGradient(Normals, X, Y);
-
-      // Combine gradients to detect edges
-      float EdgeStrength = FMath::Max(DepthGradient, NormalsGradient);
-
-      // Set the pixel value in the output mask
-      OutEdgeMask.Pixels[Y * Depth.Width + X] = FLinearColor(EdgeStrength, EdgeStrength, EdgeStrength, 1.0f);
-    }
-  }
-}
-
-float UComfyTexturesWidgetBase::ComputeDepthGradient(const FComfyTexturesImageData& Image, int X, int Y) const
+static float ComputeDepthGradient(const FComfyTexturesImageData& Image, int X, int Y)
 {
   // Sobel operator kernels for x and y directions
   const int SobelX[3][3] = { {-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1} };
@@ -2408,7 +2298,7 @@ float UComfyTexturesWidgetBase::ComputeDepthGradient(const FComfyTexturesImageDa
   return FMath::Sqrt(GradX * GradX + GradY * GradY);
 }
 
-float UComfyTexturesWidgetBase::ComputeNormalsGradient(const FComfyTexturesImageData& Image, int X, int Y) const
+static float ComputeNormalsGradient(const FComfyTexturesImageData& Image, int X, int Y)
 {
   // Sobel operator kernels for x and y directions
   const int SobelX[3][3] = { {-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1} };
@@ -2444,6 +2334,39 @@ float UComfyTexturesWidgetBase::ComputeNormalsGradient(const FComfyTexturesImage
   // Calculate the gradient magnitude
   FVector Gradient = GradX + GradY;
   return Gradient.Size();
+}
+
+void UComfyTexturesWidgetBase::CreateEdgeMask(const FComfyTexturesImageData& Depth, const FComfyTexturesImageData& Normals, FComfyTexturesImageData& OutEdgeMask) const
+{
+  if (Depth.Width != Normals.Width || Depth.Height != Normals.Height)
+  {
+    UE_LOG(LogTemp, Error, TEXT("Depth and normals images have different dimensions."));
+    return;
+  }
+
+  // perform edge detection on the depth and normals images
+  OutEdgeMask.Width = Depth.Width;
+  OutEdgeMask.Height = Depth.Height;
+  OutEdgeMask.Pixels.SetNumUninitialized(Depth.Pixels.Num());
+
+  // Assuming Depth and Normals are of the same dimensions
+  for (int Y = 0; Y < Depth.Height; Y++)
+  {
+    for (int X = 0; X < Depth.Width; X++)
+    {
+      // Compute depth gradient
+      float DepthGradient = ComputeDepthGradient(Depth, X, Y);
+
+      // Compute normals gradient
+      float NormalsGradient = ComputeNormalsGradient(Normals, X, Y);
+
+      // Combine gradients to detect edges
+      float EdgeStrength = FMath::Max(DepthGradient, NormalsGradient);
+
+      // Set the pixel value in the output mask
+      OutEdgeMask.Pixels[Y * Depth.Width + X] = FLinearColor(EdgeStrength, EdgeStrength, EdgeStrength, 1.0f);
+    }
+  }
 }
 
 void UComfyTexturesWidgetBase::LoadRenderResultImages(TFunction<void(bool)> Callback)
