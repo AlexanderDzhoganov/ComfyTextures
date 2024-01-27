@@ -67,17 +67,23 @@ class UComfyTexturesSettings : public UObject
   GENERATED_BODY()
 
   public:
-  UPROPERTY(EditAnywhere, config, Category = "General")
+  UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "ComfyUI URL", ToolTip = "URL of your ComfyUI server, leave as is if running locally"))
   FString ComfyUrl = "http://127.0.0.1:8188";
 
-  UPROPERTY(EditAnywhere, config, Category = "General")
+  UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "Min. Texture Size", ToolTip = "Minimum texture size for generated textures, should be a power of 2"))
   int MinTextureSize = 64;
 
-  UPROPERTY(EditAnywhere, config, Category = "General")
+  UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "Max. Texture Size", ToolTip = "Maximum texture size for generated textures, should be a power of 2"))
   int MaxTextureSize = 4096;
 
-  UPROPERTY(EditAnywhere, config, Category = "General")
+  UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "Texture Quality Multiplier", ToolTip = "Multiplier for texture quality, higher is better"))
   float TextureQualityMultiplier = 0.5f;
+
+  UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "Capture Size", ToolTip = "Size of the scene capture textures, should be a power of 2"))
+  int CaptureSize = 2048;
+
+  UPROPERTY(EditAnywhere, config, Category = "General", meta = (DisplayName = "Upload Size", ToolTip = "Size of images uploaded to ComfyUI as workflow inputs"))
+  int UploadSize = 1024;
 };
 
 USTRUCT(BlueprintType)
@@ -89,10 +95,10 @@ struct FComfyTexturesImageData
   TArray<FLinearColor> Pixels;
 
   UPROPERTY(BlueprintReadOnly)
-  int Width;
+  int Width = 0;
 
   UPROPERTY(BlueprintReadOnly)
-  int Height;
+  int Height = 0;
 };
 
 USTRUCT(BlueprintType)
@@ -354,7 +360,9 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
 
   bool CreateCameraTransforms(AActor* Actor, const FComfyTexturesRenderOptions& RenderOpts, TArray<FMinimalViewInfo>& OutViewInfos) const;
 
-  bool CaptureSceneTextures(UWorld* World, TArray<AActor*> Actors, const TArray<FMinimalViewInfo>& ViewInfos, EComfyTexturesMode Mode, TArray<FComfyTexturesCaptureOutput>& Outputs) const;
+  bool CaptureSceneTextures(UWorld* World, TArray<AActor*> Actors, const TArray<FMinimalViewInfo>& ViewInfos, EComfyTexturesMode Mode, const TSharedPtr<TArray<FComfyTexturesCaptureOutput>>& Outputs) const;
+
+  void ProcessSceneTextures(const TSharedPtr<TArray<FComfyTexturesCaptureOutput>>& Outputs, EComfyTexturesMode Mode, int TargetSize, TFunction<void()> Callback) const;
 
   bool ReadRenderTargetPixels(UTextureRenderTarget2D* InputTexture, EComfyTexturesRenderTextureMode Mode, FComfyTexturesImageData& OutImage) const;
 
@@ -377,4 +385,6 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   void LoadRenderResultImages(TFunction<void(bool)> Callback);
 
   void TransitionToIdleState();
+
+  void ResizeImage(FComfyTexturesImageData& Image, int NewWidth, int NewHeight) const;
 };

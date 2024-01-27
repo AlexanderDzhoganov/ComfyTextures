@@ -227,7 +227,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
     }
   }
 
-  TArray<FComfyTexturesCaptureOutput> CaptureResults;
+  TSharedPtr<TArray<FComfyTexturesCaptureOutput>> CaptureResults = MakeShared<TArray<FComfyTexturesCaptureOutput>>();
 
   if (!CaptureSceneTextures(Actors[0]->GetWorld(), Actors, ViewInfos, RenderOpts.Mode, CaptureResults))
   {
@@ -254,87 +254,97 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
     MagentaPixel->ConditionalBeginDestroy();
   }
 
-  for (int Index = 0; Index < CaptureResults.Num(); Index++)
-  {
-    const FComfyTexturesCaptureOutput& Output = CaptureResults[Index];
-    const FMinimalViewInfo& ViewInfo = ViewInfos[Index];
-    const FComfyTexturesImageData& RawDepth = CaptureResults[Index].RawDepth;
-
-    TArray<FComfyTexturesImageData> Images;
-    TArray<FString> FileNames;
-
-    Images.Add(Output.Depth);
-    FileNames.Add("depth_" + FString::FromInt(Index) + ".png");
-
-    Images.Add(Output.Normals);
-    FileNames.Add("normals_" + FString::FromInt(Index) + ".png");
-
-    Images.Add(Output.Color);
-    FileNames.Add("color_" + FString::FromInt(Index) + ".png");
-
-    Images.Add(Output.EditMask);
-    FileNames.Add("mask_" + FString::FromInt(Index) + ".png");
-
-    Images.Add(Output.EdgeMask);
-    FileNames.Add("edge_mask_" + FString::FromInt(Index) + ".png");
-
-    bool bSuccess = UploadImages(Images, FileNames, [this, RenderOpts, ViewInfo, RawDepth](const TArray<FString>& FileNames, bool bSuccess)
+  UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
+  ProcessSceneTextures(CaptureResults, RenderOpts.Mode, Settings->UploadSize, [this, CaptureResults, ViewInfos, RenderOpts]()
+    {
+      for (int Index = 0; Index < CaptureResults->Num(); Index++)
       {
+        const FComfyTexturesCaptureOutput& Output = (*CaptureResults)[Index];
+        const FMinimalViewInfo& ViewInfo = ViewInfos[Index];
+        const FComfyTexturesImageData& RawDepth = Output.RawDepth;
+
+        TArray<FComfyTexturesImageData> Images;
+        TArray<FString> FileNames;
+
+        Images.Add(Output.Depth);
+        FileNames.Add("depth_" + FString::FromInt(Index) + ".png");
+
+        Images.Add(Output.Normals);
+        FileNames.Add("normals_" + FString::FromInt(Index) + ".png");
+
+        Images.Add(Output.Color);
+        FileNames.Add("color_" + FString::FromInt(Index) + ".png");
+
+        Images.Add(Output.EdgeMask);
+        FileNames.Add("edge_mask_" + FString::FromInt(Index) + ".png");
+
+        if (RenderOpts.Mode == EComfyTexturesMode::Edit)
+        {
+          Images.Add(Output.EditMask);
+          FileNames.Add("mask_" + FString::FromInt(Index) + ".png");
+        }
+
+        bool bSuccess = UploadImages(Images, FileNames, [this, RenderOpts, ViewInfo, RawDepth](const TArray<FString>& FileNames, bool bSuccess)
+          {
+            if (!bSuccess)
+            {
+              UE_LOG(LogTemp, Warning, TEXT("Upload failed"));
+              TransitionToIdleState();
+              return;
+            }
+
+            UE_LOG(LogTemp, Warning, TEXT("Upload complete"));
+
+            for (const FString& FileName : FileNames)
+            {
+              UE_LOG(LogTemp, Warning, TEXT("Uploaded file: %s"), *FileName);
+            }
+
+            FComfyTexturesRenderOptions NewRenderOpts = RenderOpts;
+            NewRenderOpts.DepthImageFilename = FileNames[0];
+            NewRenderOpts.NormalsImageFilename = FileNames[1];
+            NewRenderOpts.ColorImageFilename = FileNames[2];
+            NewRenderOpts.EdgeMaskImageFilename = FileNames[3];
+
+            if (RenderOpts.Mode == EComfyTexturesMode::Edit)
+            {
+              NewRenderOpts.MaskImageFilename = FileNames[4];
+            }
+
+            int RequestIndex;
+            if (!QueueRender(NewRenderOpts, RequestIndex))
+            {
+              UE_LOG(LogTemp, Warning, TEXT("Failed to queue render"));
+              TransitionToIdleState();
+              return;
+            }
+
+            TOptional<FMatrix> CustomProjectionMatrix;
+            FMatrix ViewMatrix, ProjectionMatrix, ViewProjectionMatrix;
+            UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(ViewInfo, CustomProjectionMatrix,
+              ViewMatrix, ProjectionMatrix, ViewProjectionMatrix);
+
+            if (!RenderQueue.Contains(RequestIndex))
+            {
+              UE_LOG(LogTemp, Warning, TEXT("Render queue does not contain request index"));
+              TransitionToIdleState();
+              return;
+            }
+
+            const FComfyTexturesRenderDataPtr& Data = RenderQueue[RequestIndex];
+            Data->ViewInfo = ViewInfo;
+            Data->ViewMatrix = ViewMatrix;
+            Data->ProjectionMatrix = ProjectionMatrix;
+            Data->RawDepth = RawDepth;
+          });
+
         if (!bSuccess)
         {
-          UE_LOG(LogTemp, Warning, TEXT("Upload failed"));
+          UE_LOG(LogTemp, Warning, TEXT("Failed to upload capture results"));
           TransitionToIdleState();
-          return;
         }
-
-        UE_LOG(LogTemp, Warning, TEXT("Upload complete"));
-
-        for (const FString& FileName : FileNames)
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Uploaded file: %s"), *FileName);
-        }
-
-        FComfyTexturesRenderOptions NewRenderOpts = RenderOpts;
-        NewRenderOpts.DepthImageFilename = FileNames[0];
-        NewRenderOpts.NormalsImageFilename = FileNames[1];
-        NewRenderOpts.ColorImageFilename = FileNames[2];
-        NewRenderOpts.MaskImageFilename = FileNames[3];
-        NewRenderOpts.EdgeMaskImageFilename = FileNames[4];
-
-        int RequestIndex;
-        if (!QueueRender(NewRenderOpts, RequestIndex))
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Failed to queue render"));
-          TransitionToIdleState();
-          return;
-        }
-
-        TOptional<FMatrix> CustomProjectionMatrix;
-        FMatrix ViewMatrix, ProjectionMatrix, ViewProjectionMatrix;
-        UGameplayStatics::CalculateViewProjectionMatricesFromMinimalView(ViewInfo, CustomProjectionMatrix,
-          ViewMatrix, ProjectionMatrix, ViewProjectionMatrix);
-
-        if (!RenderQueue.Contains(RequestIndex))
-        {
-          UE_LOG(LogTemp, Warning, TEXT("Render queue does not contain request index"));
-          TransitionToIdleState();
-          return;
-        }
-
-        const FComfyTexturesRenderDataPtr& Data = RenderQueue[RequestIndex];
-        Data->ViewInfo = ViewInfo;
-        Data->ViewMatrix = ViewMatrix;
-        Data->ProjectionMatrix = ProjectionMatrix;
-        Data->RawDepth = RawDepth;
-      });
-
-    if (!bSuccess)
-    {
-      UE_LOG(LogTemp, Warning, TEXT("Failed to upload capture results"));
-      TransitionToIdleState();
-      return false;
-    }
-  }
+      }
+    });
 
   return true;
 }
@@ -1829,7 +1839,7 @@ bool UComfyTexturesWidgetBase::ReadRenderTargetPixels(UTextureRenderTarget2D* In
     return false;
   }
 
-  TArray<FFloat16Color> Pixels;
+  static TArray<FFloat16Color> Pixels;
   Pixels.SetNumUninitialized(InputTexture->SizeX * InputTexture->SizeY);
   if (!RenderTargetResource->ReadFloat16Pixels(Pixels))
   {
@@ -2271,12 +2281,12 @@ void UComfyTexturesWidgetBase::CreateEditMaskFromImage(const TArray<FLinearColor
   }
 }
 
+// Sobel operator kernels for x and y directions
+static const int SobelX[3][3] = { {-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1} };
+static const int SobelY[3][3] = { {-1, -2, -1}, {0, 0, 0}, {1, 2, 1} };
+
 static float ComputeDepthGradient(const FComfyTexturesImageData& Image, int X, int Y)
 {
-  // Sobel operator kernels for x and y directions
-  const int SobelX[3][3] = { {-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1} };
-  const int SobelY[3][3] = { {-1, -2, -1}, {0, 0, 0}, {1, 2, 1} };
-
   float GradX = 0.0f;
   float GradY = 0.0f;
 
@@ -2300,10 +2310,6 @@ static float ComputeDepthGradient(const FComfyTexturesImageData& Image, int X, i
 
 static float ComputeNormalsGradient(const FComfyTexturesImageData& Image, int X, int Y)
 {
-  // Sobel operator kernels for x and y directions
-  const int SobelX[3][3] = { {-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1} };
-  const int SobelY[3][3] = { {-1, -2, -1}, {0, 0, 0}, {1, 2, 1} };
-
   FVector GradX(0.0f, 0.0f, 0.0f);
   FVector GradY(0.0f, 0.0f, 0.0f);
 
@@ -2336,6 +2342,48 @@ static float ComputeNormalsGradient(const FComfyTexturesImageData& Image, int X,
   return Gradient.Size();
 }
 
+static float ComputeImageGradient(const FComfyTexturesImageData& Image, bool bIsDepth, TArray<float>& OutGrad)
+{
+  OutGrad.SetNumUninitialized(Image.Pixels.Num());
+
+  float MaxGradient = -FLT_MAX;
+
+  for (int Y = 0; Y < Image.Height; Y++)
+  {
+    for (int X = 0; X < Image.Width; X++)
+    {
+      float Gradient = bIsDepth ? ComputeDepthGradient(Image, X, Y) : ComputeNormalsGradient(Image, X, Y);
+      OutGrad[Y * Image.Width + X] = Gradient;
+
+      MaxGradient = FMath::Max(MaxGradient, Gradient);
+    }
+  }
+
+  if (FMath::IsNearlyZero(MaxGradient))
+  {
+    return 0.0f;
+  }
+
+  float AverageMagnitude = 0.0f;
+
+  for (int Y = 0; Y < Image.Height; Y++)
+  {
+    for (int X = 0; X < Image.Width; X++)
+    {
+      OutGrad[Y * Image.Width + X] /= MaxGradient;
+      AverageMagnitude += OutGrad[Y * Image.Width + X];
+    }
+  }
+
+  AverageMagnitude /= Image.Pixels.Num();
+  return AverageMagnitude;
+}
+
+static float ComputeAdaptiveThreshold(const TArray<float>& Grad, float AverageGradient, float BaseThreshold, float ScaleFactor = 1.0f)
+{
+  return BaseThreshold + ScaleFactor * AverageGradient;
+}
+
 void UComfyTexturesWidgetBase::CreateEdgeMask(const FComfyTexturesImageData& Depth, const FComfyTexturesImageData& Normals, FComfyTexturesImageData& OutEdgeMask) const
 {
   if (Depth.Width != Normals.Width || Depth.Height != Normals.Height)
@@ -2349,19 +2397,38 @@ void UComfyTexturesWidgetBase::CreateEdgeMask(const FComfyTexturesImageData& Dep
   OutEdgeMask.Height = Depth.Height;
   OutEdgeMask.Pixels.SetNumUninitialized(Depth.Pixels.Num());
 
+  TArray<float> DepthGrad;
+  float AvgDepth = ComputeImageGradient(Depth, true, DepthGrad);
+
+  TArray<float> NormalsGrad;
+  float AvgNormals = ComputeImageGradient(Normals, false, NormalsGrad);
+
+  const float DepthBaseThreshold = 0.01f;
+  const float NormalsBaseThreshold = 0.1f;
+  const float DepthScale = 8.0f;
+  const float NormalsScale = 0.8f;
+
+  float DepthThreshold = ComputeAdaptiveThreshold(DepthGrad, AvgDepth, DepthBaseThreshold);
+  float NormalsThreshold = ComputeAdaptiveThreshold(NormalsGrad, AvgNormals, NormalsBaseThreshold);
+
+  UE_LOG(LogTemp, Warning, TEXT("CreateEdgeMask(): DepthThreshold: %f, NormalsThreshold: %f"), DepthThreshold, NormalsThreshold);
+
   // Assuming Depth and Normals are of the same dimensions
   for (int Y = 0; Y < Depth.Height; Y++)
   {
     for (int X = 0; X < Depth.Width; X++)
     {
-      // Compute depth gradient
-      float DepthGradient = ComputeDepthGradient(Depth, X, Y);
+      // Compute gradients
+      float DepthGradient = DepthGrad[Y * Depth.Width + X];
+      float NormalsGradient = NormalsGrad[Y * Depth.Width + X];
 
-      // Compute normals gradient
-      float NormalsGradient = ComputeNormalsGradient(Normals, X, Y);
+      // Apply thresholds
+      DepthGradient = (DepthGradient >= DepthThreshold) ? DepthGradient : 0.0f;
+      NormalsGradient = (NormalsGradient >= NormalsThreshold) ? NormalsGradient : 0.0f;
 
-      // Combine gradients to detect edges
-      float EdgeStrength = FMath::Max(DepthGradient, NormalsGradient);
+      // Combine gradients for edge strength
+      float EdgeStrength = FMath::Max(DepthGradient * DepthScale, NormalsGradient * NormalsScale);
+      EdgeStrength = FMath::Clamp(EdgeStrength, 0.0f, 1.0f);
 
       // Set the pixel value in the output mask
       OutEdgeMask.Pixels[Y * Depth.Width + X] = FLinearColor(EdgeStrength, EdgeStrength, EdgeStrength, 1.0f);
@@ -2594,11 +2661,13 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
   return true;
 }
 
-bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor*> Actors, const TArray<FMinimalViewInfo>& ViewInfos, EComfyTexturesMode Mode, TArray<FComfyTexturesCaptureOutput>& Outputs) const
+bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor*> Actors, const TArray<FMinimalViewInfo>& ViewInfos, EComfyTexturesMode Mode, const TSharedPtr<TArray<FComfyTexturesCaptureOutput>>& Outputs) const
 {
+  UComfyTexturesSettings* Settings = GetMutableDefault<UComfyTexturesSettings>();
+
   // create RTF RGBA8 render target
   UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>();
-  RenderTarget->InitCustomFormat(1024, 1024, EPixelFormat::PF_FloatRGBA, true);
+  RenderTarget->InitCustomFormat(Settings->CaptureSize, Settings->CaptureSize, EPixelFormat::PF_FloatRGBA, true);
   RenderTarget->UpdateResourceImmediate();
 
   // create scene capture component
@@ -2653,10 +2722,6 @@ bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor
       return false;
     }
 
-    Output.EditMask.Width = Output.Color.Width;
-    Output.EditMask.Height = Output.Color.Height;
-    CreateEditMaskFromImage(Output.Color.Pixels, Output.EditMask.Pixels);
-
     SceneCapture->CaptureSource = ESceneCaptureSource::SCS_Normal;
     SceneCapture->CaptureScene();
 
@@ -2666,9 +2731,7 @@ bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor
       return false;
     }
 
-    CreateEdgeMask(Output.Depth, Output.Normals, Output.EdgeMask);
-
-    Outputs.Add(MoveTemp(Output));
+    Outputs->Add(MoveTemp(Output));
   }
 
   // destroy the scene capture component
@@ -2680,4 +2743,73 @@ bool UComfyTexturesWidgetBase::CaptureSceneTextures(UWorld* World, TArray<AActor
   RenderTarget = nullptr;
 
   return true;
+}
+
+void UComfyTexturesWidgetBase::ProcessSceneTextures(const TSharedPtr<TArray<FComfyTexturesCaptureOutput>>& Outputs, EComfyTexturesMode Mode, int TargetSize, TFunction<void()> Callback) const
+{
+  TargetSize = FMath::RoundUpToPowerOfTwo(TargetSize);
+
+  AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, TargetSize, Outputs, Mode, Callback]()
+    {
+      for (int Index = 0; Index < Outputs->Num(); Index++)
+      {
+        FComfyTexturesCaptureOutput& Output = (*Outputs)[Index];
+
+        // create the edit mask
+
+        if (Mode == EComfyTexturesMode::Edit)
+        {
+          Output.EditMask.Width = Output.Color.Width;
+          Output.EditMask.Height = Output.Color.Height;
+          CreateEditMaskFromImage(Output.Color.Pixels, Output.EditMask.Pixels);
+          ResizeImage(Output.EditMask, TargetSize, TargetSize);
+        }
+
+        // create the edge mask
+        CreateEdgeMask(Output.Depth, Output.Normals, Output.EdgeMask);
+        ResizeImage(Output.EdgeMask, TargetSize, TargetSize);
+
+        ResizeImage(Output.Color, TargetSize, TargetSize);
+        ResizeImage(Output.Depth, TargetSize, TargetSize);
+        ResizeImage(Output.Normals, TargetSize, TargetSize);
+      }
+      AsyncTask(ENamedThreads::GameThread, Callback);
+
+    });
+}
+
+void UComfyTexturesWidgetBase::ResizeImage(FComfyTexturesImageData& Image, int NewWidth, int NewHeight) const
+{
+  static TArray<FColor> OldPixels;
+  OldPixels.SetNumUninitialized(Image.Width * Image.Height);
+
+  for (int Y = 0; Y < Image.Height; Y++)
+  {
+    for (int X = 0; X < Image.Width; X++)
+    {
+      FLinearColor Pixel = Image.Pixels[Y * Image.Width + X];
+      Pixel *= 255.0f;
+      OldPixels[Y * Image.Width + X] = FColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
+    }
+  }
+
+  TArray<FColor> NewPixels;
+  NewPixels.SetNumUninitialized(NewWidth * NewHeight);
+
+  FImageUtils::ImageResize(Image.Width, Image.Height, OldPixels, NewWidth, NewHeight, NewPixels, true, false);
+
+  Image.Width = NewWidth;
+  Image.Height = NewHeight;
+  Image.Pixels.SetNumUninitialized(NewWidth * NewHeight);
+
+  for (int Y = 0; Y < Image.Height; Y++)
+  {
+    for (int X = 0; X < Image.Width; X++)
+    {
+      FColor Pixel = NewPixels[Y * Image.Width + X];
+      FLinearColor NewPixel = FLinearColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
+      NewPixel /= 255.0f;
+      Image.Pixels[Y * Image.Width + X] = NewPixel;
+    }
+  }
 }
