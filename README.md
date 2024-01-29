@@ -67,7 +67,9 @@ The models directory is relative to the ComfyUI root directory i.e. `<ComfyUI Ro
 
 5. Open the plugin window by clicking on `Tools -> Editor Utility Widgets -> Comfy Textures Widget`.
 
-    If the menu item is missing you need to open the `ComfyTexturesWidget` from the content browser in `Plugins/Comfy Textures Content/` and click `Run Utility Widget` in the blueprint editor.
+    If the menu item is missing you need to open the `ComfyTexturesWidget` from the Content Browser in `Plugins/Comfy Textures Content/` and click `Run Utility Widget` in the blueprint editor.
+
+   If you don't see the Plugin folder in the Content Browser then click the `Settings` button on the top right of the Content Browser and make sure the `Show Plugin Contents` checkbox is enabled in the menu.
 
 # Usage
 
