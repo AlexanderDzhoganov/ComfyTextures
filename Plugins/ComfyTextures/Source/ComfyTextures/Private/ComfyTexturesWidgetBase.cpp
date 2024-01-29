@@ -896,14 +896,18 @@ static TArray<TSharedPtr<FJsonObject>> FindNodesByTitle(const FJsonObject& Workf
       continue;
     }
 
-    TSharedPtr<FJsonObject> Meta = (*NodeObject)->GetObjectField("_meta");
-    if (!Meta.IsValid())
+    const TSharedPtr<FJsonObject>* Meta;
+    if (!(*NodeObject)->TryGetObjectField("_meta", Meta))
+    {
+      continue;
+    }
+    if (!Meta->IsValid())
     {
       continue;
     }
 
     FString NodeTitle;
-    if (!Meta->TryGetStringField("title", NodeTitle))
+    if (!(*Meta)->TryGetStringField("title", NodeTitle))
     {
       continue;
     }
@@ -923,12 +927,16 @@ static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
 
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
-    if (!Node->HasField("inputs"))
+    const TSharedPtr<FJsonObject>* Inputs;
+    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
     {
       continue;
     }
 
-    Node->GetObjectField("inputs")->SetNumberField(PropertyName, Value);
+    if ((*Inputs)->HasField(PropertyName))
+    {
+      (*Inputs)->SetNumberField(PropertyName, Value);
+    }
   }
 }
 
@@ -938,12 +946,16 @@ static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
 
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
-    if (!Node->HasField("inputs"))
+    const TSharedPtr<FJsonObject>* Inputs;
+    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
     {
       continue;
     }
 
-    Node->GetObjectField("inputs")->SetNumberField(PropertyName, Value);
+    if ((*Inputs)->HasField(PropertyName))
+    {
+      (*Inputs)->SetNumberField(PropertyName, Value);
+    }
   }
 }
 
@@ -953,19 +965,16 @@ static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
 
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
-    if (!Node->HasField("inputs"))
+    const TSharedPtr<FJsonObject>* Inputs;
+    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
     {
-      UE_LOG(LogComfyTextures, Warning, TEXT("Node %s does not have inputs"), *NodeName);
       continue;
     }
 
-    if (!Node->GetObjectField("inputs")->HasField(PropertyName))
+    if ((*Inputs)->HasField(PropertyName))
     {
-      UE_LOG(LogComfyTextures, Warning, TEXT("Node %s does not have input %s"), *NodeName, *PropertyName);
-      continue;
+      (*Inputs)->SetStringField(PropertyName, Value);
     }
-
-    Node->GetObjectField("inputs")->SetStringField(PropertyName, Value);
   }
 }
 
@@ -975,12 +984,13 @@ static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
 
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
-    if (!Node->HasField("inputs"))
+    const TSharedPtr<FJsonObject>* Inputs;
+    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
     {
       continue;
     }
 
-    if (!Node->GetObjectField("inputs")->TryGetNumberField(PropertyName, OutValue))
+    if (!(*Inputs)->TryGetNumberField(PropertyName, OutValue))
     {
       continue;
     }
@@ -997,12 +1007,13 @@ static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
 
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
-    if (!Node->HasField("inputs"))
+    const TSharedPtr<FJsonObject>* Inputs;
+    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
     {
       continue;
     }
 
-    if (!Node->GetObjectField("inputs")->TryGetStringField(PropertyName, OutValue))
+    if (!(*Inputs)->TryGetStringField(PropertyName, OutValue))
     {
       continue;
     }
@@ -1019,12 +1030,13 @@ static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
 
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
-    if (!Node->HasField("inputs"))
+    const TSharedPtr<FJsonObject>* Inputs;
+    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
     {
       continue;
     }
 
-    if (!Node->GetObjectField("inputs")->TryGetNumberField(PropertyName, OutValue))
+    if (!(*Inputs)->TryGetNumberField(PropertyName, OutValue))
     {
       continue;
     }
@@ -1144,7 +1156,15 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
         return;
       }
 
-      FString PromptId = Response->GetStringField("prompt_id");
+      FString PromptId;
+      if (!Response->TryGetStringField("prompt_id", PromptId))
+      {
+        UE_LOG(LogComfyTextures, Error, TEXT("Failed to get prompt ID"));
+        Data.State = EComfyTexturesRenderState::Failed;
+        This->HandleRenderStateChanged(Data);
+        return;
+      }
+
       Data.PromptId = PromptId;
       Data.State = EComfyTexturesRenderState::Pending;
 

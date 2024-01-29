@@ -113,16 +113,16 @@ struct FComfyTexturesRenderData
   FString PromptId;
 
   UPROPERTY(BlueprintReadOnly)
-  EComfyTexturesRenderState State;
+  EComfyTexturesRenderState State = EComfyTexturesRenderState::Pending;
 
   UPROPERTY(BlueprintReadOnly)
   TArray<FString> OutputFileNames;
 
   UPROPERTY(BlueprintReadOnly)
-  float Progress;
+  float Progress = 0.0f;
 
   UPROPERTY(BlueprintReadOnly)
-  int CurrentNodeIndex;
+  int CurrentNodeIndex = -1;
 
   FMinimalViewInfo ViewInfo;
 
@@ -134,13 +134,13 @@ struct FComfyTexturesRenderData
 
   FComfyTexturesImageData RawDepth;
 
-  int OutputWidth;
+  int OutputWidth = 0;
 
-  int OutputHeight;
+  int OutputHeight = 0;
   
-  bool bPreserveExisting;
+  bool bPreserveExisting = false;
 
-  float PreserveThreshold;
+  float PreserveThreshold = 0.5f;
 };
 
 USTRUCT(BlueprintType)
@@ -158,25 +158,25 @@ struct FComfyTexturesWorkflowParams
   int Seed = 0;
 
   UPROPERTY(BlueprintReadWrite)
-  float Cfg;
+  float Cfg = 8.0f;
 
   UPROPERTY(BlueprintReadWrite)
-  int Steps;
+  int Steps = 10;
 
   UPROPERTY(BlueprintReadWrite)
-  int RefinerSteps;
+  int RefinerSteps = 5;
 
   UPROPERTY(BlueprintReadWrite)
-  float DenoiseStrength;
+  float DenoiseStrength = 0.9f;
 
   UPROPERTY(BlueprintReadWrite)
-  float ControlDepthStrength;
+  float ControlDepthStrength = 0.3f;
 
   UPROPERTY(BlueprintReadWrite)
-  float ControlCannyStrength;
+  float ControlCannyStrength = 0.3f;
 
   UPROPERTY(BlueprintReadWrite)
-  EComfyTexturesEditMaskMode EditMaskMode;
+  EComfyTexturesEditMaskMode EditMaskMode = EComfyTexturesEditMaskMode::FromObject;
 };
 
 USTRUCT(BlueprintType)
