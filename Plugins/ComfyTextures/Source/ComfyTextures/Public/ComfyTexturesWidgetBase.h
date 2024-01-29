@@ -199,6 +199,9 @@ struct FComfyTexturesRenderOptions
   UPROPERTY(BlueprintReadWrite)
   bool bPreserveExisting;
 
+  UPROPERTY(BlueprintReadWrite)
+  float PreserveThreshold;
+
   FString DepthImageFilename;
 
   FString NormalsImageFilename;

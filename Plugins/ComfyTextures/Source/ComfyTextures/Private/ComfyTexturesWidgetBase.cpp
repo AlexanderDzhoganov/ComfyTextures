@@ -352,6 +352,7 @@ bool UComfyTexturesWidgetBase::ProcessMultipleActors(const TArray<AActor*>& Acto
             Data->ProjectionMatrix = ProjectionMatrix;
             Data->RawDepth = RawDepth;
             Data->bPreserveExisting = RenderOpts.bPreserveExisting;
+            Data->PreserveThreshold = RenderOpts.PreserveThreshold;
           });
 
         if (!bSuccess)
