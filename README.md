@@ -40,7 +40,7 @@ If you want to contribute to the project, feel free to open a pull request or an
 
 1. Install [ComfyUI](https://github.com/comfyanonymous/ComfyUI) by following the [official installation instructions](https://github.com/comfyanonymous/ComfyUI?tab=readme-ov-file#installing) for your OS.
 
-2. Download **all** of the required models from the links below and place them in the ComfyUI `models` directory.
+2. Download **all** of the required models from the links below and place them in the corresponding ComfyUI `models` sub-directory from the list.
 
 The models directory is relative to the ComfyUI root directory i.e. `<ComfyUI Root>/ComfyUI/models/`.
 
