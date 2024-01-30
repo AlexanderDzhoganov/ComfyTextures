@@ -1116,22 +1116,16 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
   SetNodeInputProperty(*Workflow, "input_mask", "image", RenderOpts.MaskImageFilename);
   SetNodeInputProperty(*Workflow, "input_edge", "image", RenderOpts.EdgeMaskImageFilename);
 
-  TSharedPtr<FJsonObject> RequestBody = MakeShared<FJsonObject>();
-  RequestBody->SetStringField("client_id", HttpClient->ClientId);
-  RequestBody->SetObjectField("prompt", Workflow);
-
-  FString RequestBodyString;
-  TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
-  FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
-
-  UE_LOG(LogComfyTextures, Verbose, TEXT("Sending render request: %s"), *RequestBodyString);
+  TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+  Payload->SetStringField("client_id", HttpClient->ClientId);
+  Payload->SetObjectField("prompt", Workflow);
 
   RequestIndex = NextRequestIndex++;
   RenderQueue.Add(RequestIndex, MakeShared<FComfyTexturesRenderData>());
 
   TWeakObjectPtr<UComfyTexturesWidgetBase> WeakThis(this);
 
-  return HttpClient->DoHttpPostRequest("prompt", RequestBodyString, [WeakThis, RequestIndex](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+  return HttpClient->DoHttpPostRequest("prompt", Payload, [WeakThis, RequestIndex](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!WeakThis.IsValid())
       {
@@ -1191,15 +1185,7 @@ void UComfyTexturesWidgetBase::InterruptRender() const
     return;
   }
 
-  TSharedPtr<FJsonObject> RequestBody = MakeShared<FJsonObject>();
-
-  FString RequestBodyString;
-  TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
-  FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
-
-  UE_LOG(LogComfyTextures, Verbose, TEXT("Sending interrupt request: %s"), *RequestBodyString);
-
-  HttpClient->DoHttpPostRequest("interrupt", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+  HttpClient->DoHttpPostRequest("interrupt", nullptr, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
@@ -1219,16 +1205,10 @@ void UComfyTexturesWidgetBase::ClearRenderQueue()
     return;
   }
 
-  TSharedPtr<FJsonObject> RequestBody = MakeShared<FJsonObject>();
-  RequestBody->SetBoolField("clear", true);
+  TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+  Payload->SetBoolField("clear", true);
 
-  FString RequestBodyString;
-  TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
-  FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
-
-  UE_LOG(LogComfyTextures, Verbose, TEXT("Sending clear request: %s"), *RequestBodyString);
-
-  HttpClient->DoHttpPostRequest("queue", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+  HttpClient->DoHttpPostRequest("queue", Payload, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
@@ -1248,21 +1228,15 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
     return;
   }
 
-  TSharedPtr<FJsonObject> RequestBody = nullptr;
-  FString RequestBodyString;
+  TSharedPtr<FJsonObject> Payload = nullptr;
 
   if (bUnloadModels)
   {
-    RequestBody = MakeShared<FJsonObject>();
-    RequestBody->SetBoolField("free_memory", true);
-    RequestBody->SetBoolField("unload_models", true);
+    Payload = MakeShared<FJsonObject>();
+    Payload->SetBoolField("free_memory", true);
+    Payload->SetBoolField("unload_models", true);
 
-    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
-    FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
-
-    UE_LOG(LogComfyTextures, Verbose, TEXT("Sending free memory request: %s"), *RequestBodyString);
-
-    HttpClient->DoHttpPostRequest("free", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+    HttpClient->DoHttpPostRequest("free", Payload, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
       {
         if (!bWasSuccessful)
         {
@@ -1274,16 +1248,10 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
       });
   }
 
-  RequestBody = MakeShared<FJsonObject>();
-  RequestBody->SetBoolField("clear", true);
+  Payload = MakeShared<FJsonObject>();
+  Payload->SetBoolField("clear", true);
 
-  RequestBodyString = "";
-  TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBodyString);
-  FJsonSerializer::Serialize(RequestBody.ToSharedRef(), Writer);
-
-  UE_LOG(LogComfyTextures, Verbose, TEXT("Sending history clear request: %s"), *RequestBodyString);
-
-  HttpClient->DoHttpPostRequest("history", RequestBodyString, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
+  HttpClient->DoHttpPostRequest("history", Payload, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
       if (!bWasSuccessful)
       {
@@ -1759,7 +1727,7 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
   FString PromptId;
   if (!(*MessageData)->TryGetStringField("prompt_id", PromptId))
   {
-    UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing prompt_id field"));
+    UE_LOG(LogComfyTextures, Verbose, TEXT("Websocket message missing prompt_id field"));
     return;
   }
 
@@ -1880,7 +1848,7 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
   }
   else
   {
-    UE_LOG(LogComfyTextures, Warning, TEXT("Unknown websocket message type: %s"), *MessageType);
+    UE_LOG(LogComfyTextures, Verbose, TEXT("Unknown websocket message type: %s"), *MessageType);
   }
 }
 

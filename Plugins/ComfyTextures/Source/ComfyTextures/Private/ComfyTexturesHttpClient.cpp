@@ -131,18 +131,27 @@ bool ComfyTexturesHttpClient::DoHttpGetRequest(const FString& Url, TFunction<voi
         }
 
         FString ResponseString = Response->GetContentAsString();
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
         TSharedPtr<FJsonObject> ResponseJson;
 
-        if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
+        if (Response->GetContentType().StartsWith("application/json"))
         {
-          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
-          Callback(nullptr, false);
-          return;
+          TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
+
+          if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
+          {
+            UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
+            UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
+            Callback(nullptr, false);
+            return;
+          }
+        }
+        else
+        {
+          ResponseJson = MakeShareable(new FJsonObject());
+          ResponseJson->SetStringField("response", ResponseString);
         }
 
-        Callback(ResponseJson, true);
+        Callback(MoveTemp(ResponseJson), true);
       });
 
   return HttpRequest->ProcessRequest();
@@ -169,13 +178,20 @@ bool ComfyTexturesHttpClient::DoHttpGetRequestRaw(const FString& Url, TFunction<
   return HttpRequest->ProcessRequest();
 }
 
-bool ComfyTexturesHttpClient::DoHttpPostRequest(const FString& Url, const FString& Content, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const
+bool ComfyTexturesHttpClient::DoHttpPostRequest(const FString& Url, const TSharedPtr<FJsonObject>& Payload, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const
 {
   TSharedRef<IHttpRequest> HttpRequest = FHttpModule::Get().CreateRequest();
   HttpRequest->SetVerb("POST");
   HttpRequest->SetURL(BaseUrl + "/" + Url);
   HttpRequest->SetHeader("Content-Type", "application/json");
-  HttpRequest->SetContentAsString(Content);
+
+  if (Payload.IsValid())
+  {
+    FString RequestBody;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&RequestBody);
+    FJsonSerializer::Serialize(Payload.ToSharedRef(), Writer);
+    HttpRequest->SetContentAsString(RequestBody);
+  }
 
   HttpRequest->OnProcessRequestComplete()
     .BindLambda([Callback](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
@@ -188,18 +204,27 @@ bool ComfyTexturesHttpClient::DoHttpPostRequest(const FString& Url, const FStrin
         }
 
         FString ResponseString = Response->GetContentAsString();
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
         TSharedPtr<FJsonObject> ResponseJson;
 
-        if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
+        if (Response->GetContentType().StartsWith("application/json"))
         {
-          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
-          Callback(nullptr, false);
-          return;
+          TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
+
+          if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
+          {
+            UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
+            UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
+            Callback(nullptr, false);
+            return;
+          }
+        }
+        else
+        {
+          ResponseJson = MakeShareable(new FJsonObject());
+          ResponseJson->SetStringField("response", ResponseString);
         }
 
-        Callback(ResponseJson, true);
+        Callback(MoveTemp(ResponseJson), true);
       });
 
   return HttpRequest->ProcessRequest();
@@ -257,18 +282,27 @@ bool ComfyTexturesHttpClient::DoHttpFileUpload(const FString& Url, const TArray6
         }
 
         FString ResponseString = Response->GetContentAsString();
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
         TSharedPtr<FJsonObject> ResponseJson;
 
-        if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
+        if (Response->GetContentType().StartsWith("application/json"))
         {
-          UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
-          UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
-          Callback(nullptr, false);
-          return;
+          TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
+
+          if (!FJsonSerializer::Deserialize(Reader, ResponseJson))
+          {
+            UE_LOG(LogComfyTextures, Warning, TEXT("Failed to deserialize response JSON"));
+            UE_LOG(LogComfyTextures, Warning, TEXT("%s"), *ResponseString);
+            Callback(nullptr, false);
+            return;
+          }
+        }
+        else
+        {
+          ResponseJson = MakeShareable(new FJsonObject());
+          ResponseJson->SetStringField("response", ResponseString);
         }
 
-        Callback(ResponseJson, true);
+        Callback(MoveTemp(ResponseJson), true);
       });
 
   return HttpRequest->ProcessRequest();

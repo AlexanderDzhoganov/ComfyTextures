@@ -26,7 +26,7 @@ public:
 
 	bool DoHttpGetRequestRaw(const FString& Url, TFunction<void(const TArray<uint8>&, bool)> Callback) const;
 
-	bool DoHttpPostRequest(const FString& Url, const FString& Content, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
+	bool DoHttpPostRequest(const FString& Url, const TSharedPtr<FJsonObject>& Payload, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
 
 	bool DoHttpFileUpload(const FString& Url, const TArray64<uint8>& FileData, const FString& FileName, TFunction<void(const TSharedPtr<FJsonObject>&, bool)> Callback) const;
 	
