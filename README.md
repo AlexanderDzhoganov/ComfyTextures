@@ -57,7 +57,7 @@ The models directory is relative to the ComfyUI root directory i.e. `<ComfyUI Ro
 
 2. Build the Unreal project by right clicking on `MyProject.uproject` and selecting `Generate Visual Studio project files`.
 
-    This will generate a `MyProject.sln` file in the project directory. Open the file in Visual Studio and build the project by pressing `F7`. If you are encountering errors, make sure Visual Studio is correctly configured for Unreal Engine by following [this guide](https://docs.unrealengine.com/5.3/en-US/setting-up-visual-studio-development-environment-for-cplusplus-projects-in-unreal-engine/).
+    This will generate a `MyProject.sln` file in the project directory. Open the file in Visual Studio and compile the project by selecting `Build -> Build Solution` in the top menu. If you are encountering errors, make sure Visual Studio is correctly configured for Unreal Engine by following [this guide](https://docs.unrealengine.com/5.3/en-US/setting-up-visual-studio-development-environment-for-cplusplus-projects-in-unreal-engine/).
 
 3. Open the project in the Unreal Engine editor.
 
