@@ -2574,6 +2574,12 @@ bool UComfyTexturesWidgetBase::CreateCameraTransforms(AActor* Actor, const FComf
     FMinimalViewInfo ViewInfo;
     CameraComponent->GetCameraView(0.0f, ViewInfo);
 
+    if (!FMath::IsNearlyEqual(ViewInfo.AspectRatio, 1.0f))
+    {
+      UE_LOG(LogComfyTextures, Warning, TEXT("Camera aspect ratio is not 1.0, overriding it."));
+      ViewInfo.AspectRatio = 1.0f;
+    }
+
     OutViewInfos.Add(ViewInfo);
   }
   else
