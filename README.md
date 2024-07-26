@@ -119,6 +119,9 @@ You need to have `Enable Dev mode Options` enabled in the ComfyUI settings to se
 
 # Credits
 
-Made by me (Alexander Dzhoganov). If you are hiring, hit me up at alexanderdzhoganov [at] gmail [dot] com.
+Made by me (Alexander Dzhoganov).
 
 Thank you to the Stability.ai and to the ComfyUI teams for their wonderful work on Stable Diffusion and ComfyUI.
+
+## At [neuratech.io](https://neuratech.io), we are working hard on building the next generation of GenAI solutions.
+## Let's chat about your business use-case: sales@neuratech.io
