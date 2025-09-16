@@ -24,49 +24,60 @@ DEFINE_LOG_CATEGORY(LogComfyTextures);
 
 void UComfyTexturesWidgetBase::Connect()
 {
-  if (!HttpClient.IsValid())
-  {
-    HttpClient = MakeUnique<ComfyTexturesHttpClient>(GetBaseUrl());
-  }
+   if (!HttpClient.IsValid())
+   {
+     HttpClient = MakeUnique<ComfyTexturesHttpClient>(GetBaseUrl());
+   }
 
-  TWeakObjectPtr<UComfyTexturesWidgetBase> WeakThis(this);
+   // Initialize cross-platform components
+   if (!MCPClient.IsValid())
+   {
+     MCPClient = NewObject<UMCPClient>();
+   }
 
-  HttpClient->SetWebSocketStateChangedCallback([WeakThis](bool bConnected)
-    {
-      if (!WeakThis.IsValid())
-      {
-        return;
-      }
+   if (!PromptProcessor.IsValid())
+   {
+     PromptProcessor = NewObject<UPromptProcessor>();
+   }
 
-      UComfyTexturesWidgetBase* This = WeakThis.Get();
+   TWeakObjectPtr<UComfyTexturesWidgetBase> WeakThis(this);
 
-      if (bConnected)
-      {
-        This->TransitionToIdleState();
-      }
-      else
-      {
-        This->State = EComfyTexturesState::Disconnected;
-        This->OnStateChanged(This->State);
-      }
-    });
+   HttpClient->SetWebSocketStateChangedCallback([WeakThis](bool bConnected)
+     {
+       if (!WeakThis.IsValid())
+       {
+         return;
+       }
 
-  HttpClient->SetWebSocketMessageCallback([WeakThis](const TSharedPtr<FJsonObject>& Message)
-    {
-      if (!WeakThis.IsValid())
-      {
-        return;
-      }
+       UComfyTexturesWidgetBase* This = WeakThis.Get();
 
-      UComfyTexturesWidgetBase* This = WeakThis.Get();
+       if (bConnected)
+       {
+         This->TransitionToIdleState();
+       }
+       else
+       {
+         This->State = EComfyTexturesState::Disconnected;
+         This->OnStateChanged(This->State);
+       }
+     });
 
-      This->HandleWebSocketMessage(Message);
-    });
+   HttpClient->SetWebSocketMessageCallback([WeakThis](const TSharedPtr<FJsonObject>& Message)
+     {
+       if (!WeakThis.IsValid())
+       {
+         return;
+       }
 
-  HttpClient->Connect();
+       UComfyTexturesWidgetBase* This = WeakThis.Get();
 
-  State = EComfyTexturesState::Reconnecting;
-  OnStateChanged(State);
+       This->HandleWebSocketMessage(Message);
+     });
+
+   HttpClient->Connect();
+
+   State = EComfyTexturesState::Reconnecting;
+   OnStateChanged(State);
 }
 
 bool UComfyTexturesWidgetBase::IsConnected() const
@@ -2744,36 +2755,205 @@ void UComfyTexturesWidgetBase::ProcessSceneTextures(const TSharedPtr<TArray<FCom
 
 void UComfyTexturesWidgetBase::ResizeImage(FComfyTexturesImageData& Image, int NewWidth, int NewHeight) const
 {
-  static TArray<FColor> OldPixels;
-  OldPixels.SetNumUninitialized(Image.Width * Image.Height);
+   static TArray<FColor> OldPixels;
+   OldPixels.SetNumUninitialized(Image.Width * Image.Height);
 
-  for (int Y = 0; Y < Image.Height; Y++)
-  {
-    for (int X = 0; X < Image.Width; X++)
-    {
-      FLinearColor Pixel = Image.Pixels[Y * Image.Width + X];
-      Pixel *= 255.0f;
-      OldPixels[Y * Image.Width + X] = FColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
-    }
-  }
+   for (int Y = 0; Y < Image.Height; Y++)
+   {
+     for (int X = 0; X < Image.Width; X++)
+     {
+       FLinearColor Pixel = Image.Pixels[Y * Image.Width + X];
+       Pixel *= 255.0f;
+       OldPixels[Y * Image.Width + X] = FColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
+     }
+   }
 
-  TArray<FColor> NewPixels;
-  NewPixels.SetNumUninitialized(NewWidth * NewHeight);
+   TArray<FColor> NewPixels;
+   NewPixels.SetNumUninitialized(NewWidth * NewHeight);
 
-  FImageUtils::ImageResize(Image.Width, Image.Height, OldPixels, NewWidth, NewHeight, NewPixels, true, false);
+   FImageUtils::ImageResize(Image.Width, Image.Height, OldPixels, NewWidth, NewHeight, NewPixels, true, false);
 
-  Image.Width = NewWidth;
-  Image.Height = NewHeight;
-  Image.Pixels.SetNumUninitialized(NewWidth * NewHeight);
+   Image.Width = NewWidth;
+   Image.Height = NewHeight;
+   Image.Pixels.SetNumUninitialized(NewWidth * NewHeight);
 
-  for (int Y = 0; Y < Image.Height; Y++)
-  {
-    for (int X = 0; X < Image.Width; X++)
-    {
-      FColor Pixel = NewPixels[Y * Image.Width + X];
-      FLinearColor NewPixel = FLinearColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
-      NewPixel /= 255.0f;
-      Image.Pixels[Y * Image.Width + X] = NewPixel;
-    }
-  }
+   for (int Y = 0; Y < Image.Height; Y++)
+   {
+     for (int X = 0; X < Image.Width; X++)
+     {
+       FColor Pixel = NewPixels[Y * Image.Width + X];
+       FLinearColor NewPixel = FLinearColor(Pixel.R, Pixel.G, Pixel.B, Pixel.A);
+       NewPixel /= 255.0f;
+       Image.Pixels[Y * Image.Width + X] = NewPixel;
+     }
+   }
+}
+
+// Cross-platform method implementations
+void UComfyTexturesWidgetBase::SetTargetPlatform(const FString& Platform)
+{
+   TargetPlatform = Platform;
+   UE_LOG(LogComfyTextures, Log, TEXT("Target platform set to: %s"), *Platform);
+}
+
+void UComfyTexturesWidgetBase::ConfigureMinecraftConnection(const FString& ServerAddress, int32 Port, const FString& Username)
+{
+   MinecraftServerAddress = ServerAddress;
+   MinecraftServerPort = Port;
+   MinecraftUsername = Username;
+
+   if (MCPClient.IsValid())
+   {
+     MCPClient->Initialize(ServerAddress, Port, Username);
+   }
+
+   UE_LOG(LogComfyTextures, Log, TEXT("Minecraft connection configured: %s:%d as %s"), *ServerAddress, Port, *Username);
+}
+
+bool UComfyTexturesWidgetBase::ConnectToMinecraft()
+{
+   if (!MCPClient.IsValid())
+   {
+     UE_LOG(LogComfyTextures, Error, TEXT("MCP Client not initialized"));
+     return false;
+   }
+
+   TWeakObjectPtr<UComfyTexturesWidgetBase> WeakThis(this);
+
+   MCPClient->SetConnectionCallback([WeakThis](bool bConnected)
+     {
+       if (WeakThis.IsValid())
+       {
+         UE_LOG(LogComfyTextures, Log, TEXT("MCP connection status: %s"), bConnected ? TEXT("Connected") : TEXT("Disconnected"));
+       }
+     });
+
+   MCPClient->SetPromptResponseCallback([WeakThis](const TSharedPtr<FJsonObject>& Response)
+     {
+       if (WeakThis.IsValid())
+       {
+         // Handle prompt response from Minecraft
+         UE_LOG(LogComfyTextures, Log, TEXT("Received prompt response from Minecraft"));
+       }
+     });
+
+   MCPClient->SetSceneDataCallback([WeakThis](const TArray<uint8>& SceneData)
+     {
+       if (WeakThis.IsValid())
+       {
+         // Handle scene data from Minecraft
+         UE_LOG(LogComfyTextures, Log, TEXT("Received scene data from Minecraft (%d bytes)"), SceneData.Num());
+       }
+     });
+
+   MCPClient->SetErrorCallback([WeakThis](const FString& Error)
+     {
+       if (WeakThis.IsValid())
+       {
+         UE_LOG(LogComfyTextures, Error, TEXT("MCP Error: %s"), *Error);
+       }
+     });
+
+   return MCPClient->Connect();
+}
+
+bool UComfyTexturesWidgetBase::IsMinecraftConnected() const
+{
+   return MCPClient.IsValid() && MCPClient->IsConnected();
+}
+
+bool UComfyTexturesWidgetBase::ProcessCrossPlatformPrompt(const FString& Prompt, const TArray<AActor*>& Actors)
+{
+   if (!PromptProcessor.IsValid())
+   {
+     UE_LOG(LogComfyTextures, Error, TEXT("Prompt processor not initialized"));
+     return false;
+   }
+
+   // Validate prompt for current platform
+   TArray<FString> ValidationErrors;
+   if (!ValidatePromptForCurrentPlatform(Prompt, ValidationErrors))
+   {
+     for (const FString& Error : ValidationErrors)
+     {
+       UE_LOG(LogComfyTextures, Warning, TEXT("Prompt validation error: %s"), *Error);
+     }
+     return false;
+   }
+
+   // Optimize prompt for platform
+   FString OptimizedPrompt = OptimizePromptForCurrentPlatform(Prompt);
+
+   // Parse prompt components
+   FPromptComponents Components;
+   if (!PromptProcessor->ParsePrompt(OptimizedPrompt, Components))
+   {
+     UE_LOG(LogComfyTextures, Error, TEXT("Failed to parse prompt"));
+     return false;
+   }
+
+   // Generate texture parameters
+   FTextureGenerationParams Params;
+   if (!PromptProcessor->GenerateTextureParams(Components, Params))
+   {
+     UE_LOG(LogComfyTextures, Error, TEXT("Failed to generate texture parameters"));
+     return false;
+   }
+
+   if (TargetPlatform == "Minecraft" && IsMinecraftConnected())
+   {
+     // Send to Minecraft via MCP
+     TArray<uint8> SceneData; // Would serialize scene data here
+     return MCPClient->SendPrompt(OptimizedPrompt, SceneData);
+   }
+   else
+   {
+     // Use existing Unreal Engine pipeline
+     FComfyTexturesRenderOptions RenderOpts;
+     RenderOpts.Mode = EComfyTexturesMode::Create;
+     RenderOpts.Params.PositivePrompt = OptimizedPrompt;
+     RenderOpts.Params.Seed = Params.Seed;
+     RenderOpts.Params.Steps = Params.Steps;
+     RenderOpts.Params.Cfg = Params.GuidanceScale;
+
+     return ProcessMultipleActors(Actors, RenderOpts);
+   }
+}
+
+bool UComfyTexturesWidgetBase::RequestMinecraftSceneData(const FString& WorldName, const FVector& Location, float Radius)
+{
+   if (!IsMinecraftConnected())
+   {
+     UE_LOG(LogComfyTextures, Error, TEXT("Not connected to Minecraft"));
+     return false;
+   }
+
+   return MCPClient->RequestSceneData(WorldName, Location, Radius);
+}
+
+bool UComfyTexturesWidgetBase::ValidatePromptForCurrentPlatform(const FString& Prompt, TArray<FString>& OutValidationErrors)
+{
+   if (!PromptProcessor.IsValid())
+   {
+     OutValidationErrors.Add("Prompt processor not initialized");
+     return false;
+   }
+
+   return PromptProcessor->ValidatePromptForPlatform(Prompt, TargetPlatform, OutValidationErrors);
+}
+
+FString UComfyTexturesWidgetBase::OptimizePromptForCurrentPlatform(const FString& Prompt)
+{
+   if (!PromptProcessor.IsValid())
+   {
+     return Prompt;
+   }
+
+   return PromptProcessor->OptimizePromptForPlatform(Prompt, TargetPlatform);
+}
+
+void UComfyTexturesWidgetBase::RunAutomatedTests()
+{
+   UComfyTexturesTests* TestRunner = NewObject<UComfyTexturesTests>();
+   TestRunner->RunAllTests();
 }

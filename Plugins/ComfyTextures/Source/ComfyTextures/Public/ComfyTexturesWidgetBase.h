@@ -7,6 +7,8 @@
 #include "EditorUtilityWidget.h"
 #include "Camera/CameraActor.h"
 #include "ComfyTexturesHttpClient.h"
+#include "MCPClient.h"
+#include "PromptProcessor.h"
 #include "ComfyTexturesWidgetBase.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogComfyTextures, Log, All);
@@ -335,8 +337,40 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
   UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
   void GetParams(EComfyTexturesMode Mode, FComfyTexturesWorkflowParams& OutParams) const;
 
+  // Cross-platform methods
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  void SetTargetPlatform(const FString& Platform);
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  void ConfigureMinecraftConnection(const FString& ServerAddress, int32 Port, const FString& Username);
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  bool ConnectToMinecraft();
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  bool IsMinecraftConnected() const;
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  bool ProcessCrossPlatformPrompt(const FString& Prompt, const TArray<AActor*>& Actors);
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  bool RequestMinecraftSceneData(const FString& WorldName, const FVector& Location, float Radius);
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  bool ValidatePromptForCurrentPlatform(const FString& Prompt, TArray<FString>& OutValidationErrors);
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  FString OptimizePromptForCurrentPlatform(const FString& Prompt);
+
+  UFUNCTION(BlueprintCallable, Category = "ComfyTextures")
+  void RunAutomatedTests();
+
   protected:
   TUniquePtr<ComfyTexturesHttpClient> HttpClient;
+
+  // Cross-platform components
+  TUniquePtr<UMCPClient> MCPClient;
+  TUniquePtr<UPromptProcessor> PromptProcessor;
 
   // data for all render requests
   TMap<int, FComfyTexturesRenderDataPtr> RenderQueue;
@@ -352,6 +386,12 @@ class COMFYTEXTURES_API UComfyTexturesWidgetBase : public UEditorUtilityWidget
 
   // user-selected workflow parameters for each mode
   TMap<EComfyTexturesMode, FComfyTexturesWorkflowParams> Params;
+
+  // Cross-platform settings
+  FString TargetPlatform;
+  FString MinecraftServerAddress;
+  int32 MinecraftServerPort;
+  FString MinecraftUsername;
 
   private:
   FString GetBaseUrl() const;
