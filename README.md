@@ -13,6 +13,10 @@ Features:
 - [x] Image to image
 - [x] Remote ComfyUI instance support
 - [ ] Batch rendering (WIP)
+- [x] Cross-platform texture generation (Unreal Engine + Minecraft)
+- [x] MCP (Minecraft Protocol) integration
+- [x] Natural language prompt processing
+- [x] Automated testing framework
 
 Works out of the box with Unreal Engine 5.x. Should work with 4.x with minor code changes.
 
@@ -110,6 +114,44 @@ This mode uses a slower SDXL workflow to refine the low-resolution textures crea
 This mode allows you to edit the textures created in the `Create` or `Refine` mode by using an inpainting workflow. Use this mode to fix any artifacts or errors in the textures.
 
 You can select from two edit modes - `From Texture` and `From Object`. `From Texture` allows you to do precise edits by painting undesired areas to magenta (255, 0, 255, 255) using Mesh Paint. `From Object` will inpaint all selected actors.
+
+## Cross-Platform Features
+
+ComfyTextures now supports cross-platform texture generation between Unreal Engine and Minecraft through MCP (Minecraft Protocol) integration.
+
+### Minecraft Integration
+
+1. Configure Minecraft connection in the widget:
+   - Set target platform to "Minecraft"
+   - Configure server address, port, and username
+   - Connect to Minecraft server
+
+2. Use natural language prompts for scene generation:
+   - "a lush forest with glowing mushrooms at dusk"
+   - "mountain landscape with dramatic lighting"
+   - Prompts are automatically optimized for Minecraft's block-based aesthetic
+
+3. Request scene data from Minecraft worlds:
+   - Get block data, lighting, and terrain information
+   - Use for texture generation and world editing
+
+### Cross-Platform Workflow
+
+1. **Set Target Platform**: Choose between "Unreal" or "Minecraft"
+2. **Configure Connection**: For Minecraft, set server details
+3. **Process Prompts**: Use natural language to describe scenes
+4. **Generate Textures**: Automatically optimized for target platform
+5. **Apply Results**: Textures applied to Unreal materials or Minecraft blocks
+
+### Testing
+
+Run automated tests to verify cross-platform functionality:
+- Prompt processing validation
+- Platform-specific optimizations
+- MCP communication reliability
+- Texture parameter generation
+
+Use the `Run Automated Tests` button in the ComfyTextures widget.
 
 ## Editing the ComfyUI Workflows
 
