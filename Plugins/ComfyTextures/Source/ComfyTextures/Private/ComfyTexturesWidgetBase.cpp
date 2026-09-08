@@ -595,7 +595,7 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
   };
 
   TSharedPtr<SharedData> StateData = MakeShared<SharedData>();
-  StateData->RenderData = RenderQueue.begin().Value();
+  StateData->RenderData = RenderQueue.CreateIterator().Value();
   StateData->ActorTransform = ActorTransform;
   StateData->TextureWidth = TextureWidth;
   StateData->TextureHeight = TextureHeight;
