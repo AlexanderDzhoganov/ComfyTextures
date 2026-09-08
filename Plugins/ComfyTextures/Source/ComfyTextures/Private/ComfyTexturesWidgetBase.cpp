@@ -1455,7 +1455,7 @@ bool UComfyTexturesWidgetBase::ParseWorkflowJson(const FString& JsonPath, FComfy
 
 FString UComfyTexturesWidgetBase::GetWorkflowJsonPath(EComfyTexturesMode Mode) const
 {
-  FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
+  FString PluginFolderPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir()), TEXT("ComfyTextures"));
   FString JsonPath = FPaths::Combine(PluginFolderPath, TEXT("/Content/Workflows/"));
 
   if (Mode == EComfyTexturesMode::Create)
@@ -1554,7 +1554,7 @@ bool UComfyTexturesWidgetBase::LoadParams()
     Params.Add(Mode, Param);
   }
 
-  FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
+  FString PluginFolderPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir()), TEXT("ComfyTextures"));
   FString ConfigPath = FPaths::Combine(PluginFolderPath, TEXT("WidgetParams.json"));
 
   FString JsonString = "";
@@ -1618,7 +1618,7 @@ bool UComfyTexturesWidgetBase::LoadParams()
 
 bool UComfyTexturesWidgetBase::SaveParams()
 {
-  FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
+  FString PluginFolderPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir()), TEXT("ComfyTextures"));
   FString ConfigPath = FPaths::Combine(PluginFolderPath, TEXT("WidgetParams.json"));
 
   TSharedPtr<FJsonObject> ParamsObject = MakeShared<FJsonObject>();
