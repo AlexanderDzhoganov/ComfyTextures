@@ -52,7 +52,7 @@ void ComfyTexturesHttpClient::Connect()
   }
 
   WsUrl = Proto + WsUrl + "/ws?clientId=" + ClientId;
-  WebSocket = FWebSocketsModule::Get().CreateWebSocket(WsUrl, TEXT("ws"));
+  WebSocket = FWebSocketsModule::Get().CreateWebSocket(WsUrl, TArray<FString>());
 
   auto OnStateChanged = OnWebSocketStateChanged;
 
