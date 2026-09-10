@@ -595,7 +595,7 @@ bool UComfyTexturesWidgetBase::ProcessRenderResultForActor(AActor* Actor, TFunct
   };
 
   TSharedPtr<SharedData> StateData = MakeShared<SharedData>();
-  StateData->RenderData = RenderQueue.begin().Value();
+  StateData->RenderData = RenderQueue.CreateIterator().Value();
   StateData->ActorTransform = ActorTransform;
   StateData->TextureWidth = TextureWidth;
   StateData->TextureHeight = TextureHeight;
@@ -888,7 +888,7 @@ static TArray<TSharedPtr<FJsonObject>> FindNodesByTitle(const FJsonObject& Workf
 {
   TArray<TSharedPtr<FJsonObject>> Nodes;
 
-  for (const TPair<FString, TSharedPtr<FJsonValue>>& Node : Workflow.Values)
+  for (const auto& Node : Workflow.Values)
   {
     const TSharedPtr<FJsonObject>* NodeObject;
     if (!Node.Value->TryGetObject(NodeObject))
@@ -897,7 +897,7 @@ static TArray<TSharedPtr<FJsonObject>> FindNodesByTitle(const FJsonObject& Workf
     }
 
     const TSharedPtr<FJsonObject>* Meta;
-    if (!(*NodeObject)->TryGetObjectField("_meta", Meta))
+    if (!(*NodeObject)->TryGetObjectField(TEXT("_meta"), Meta))
     {
       continue;
     }
@@ -907,7 +907,7 @@ static TArray<TSharedPtr<FJsonObject>> FindNodesByTitle(const FJsonObject& Workf
     }
 
     FString NodeTitle;
-    if (!(*Meta)->TryGetStringField("title", NodeTitle))
+    if (!(*Meta)->TryGetStringField(TEXT("title"), NodeTitle))
     {
       continue;
     }
@@ -928,7 +928,7 @@ static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
     const TSharedPtr<FJsonObject>* Inputs;
-    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
+    if (!Node->TryGetObjectField(TEXT("inputs"), Inputs) || !Inputs->IsValid())
     {
       continue;
     }
@@ -947,7 +947,7 @@ static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
     const TSharedPtr<FJsonObject>* Inputs;
-    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
+    if (!Node->TryGetObjectField(TEXT("inputs"), Inputs) || !Inputs->IsValid())
     {
       continue;
     }
@@ -966,7 +966,7 @@ static void SetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
     const TSharedPtr<FJsonObject>* Inputs;
-    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
+    if (!Node->TryGetObjectField(TEXT("inputs"), Inputs) || !Inputs->IsValid())
     {
       continue;
     }
@@ -985,7 +985,7 @@ static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
     const TSharedPtr<FJsonObject>* Inputs;
-    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
+    if (!Node->TryGetObjectField(TEXT("inputs"), Inputs) || !Inputs->IsValid())
     {
       continue;
     }
@@ -1008,7 +1008,7 @@ static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
     const TSharedPtr<FJsonObject>* Inputs;
-    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
+    if (!Node->TryGetObjectField(TEXT("inputs"), Inputs) || !Inputs->IsValid())
     {
       continue;
     }
@@ -1031,7 +1031,7 @@ static bool GetNodeInputProperty(FJsonObject& Workflow, const FString& NodeName,
   for (TSharedPtr<FJsonObject>& Node : Nodes)
   {
     const TSharedPtr<FJsonObject>* Inputs;
-    if (!Node->TryGetObjectField("inputs", Inputs) || !Inputs->IsValid())
+    if (!Node->TryGetObjectField(TEXT("inputs"), Inputs) || !Inputs->IsValid())
     {
       continue;
     }
@@ -1117,8 +1117,8 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
   SetNodeInputProperty(*Workflow, "input_edge", "image", RenderOpts.EdgeMaskImageFilename);
 
   TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-  Payload->SetStringField("client_id", HttpClient->ClientId);
-  Payload->SetObjectField("prompt", Workflow);
+  Payload->SetStringField(TEXT("client_id"), HttpClient->ClientId);
+  Payload->SetObjectField(TEXT("prompt"), Workflow);
 
   RequestIndex = NextRequestIndex++;
   RenderQueue.Add(RequestIndex, MakeShared<FComfyTexturesRenderData>());
@@ -1151,7 +1151,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
       }
 
       FString PromptId;
-      if (!Response->TryGetStringField("prompt_id", PromptId))
+      if (!Response->TryGetStringField(TEXT("prompt_id"), PromptId))
       {
         UE_LOG(LogComfyTextures, Error, TEXT("Failed to get prompt ID"));
         Data.State = EComfyTexturesRenderState::Failed;
@@ -1162,7 +1162,7 @@ bool UComfyTexturesWidgetBase::QueueRender(const FComfyTexturesRenderOptions& Re
       Data.PromptId = PromptId;
       Data.State = EComfyTexturesRenderState::Pending;
 
-      if (Response->HasField("error"))
+      if (Response->HasField(TEXT("error")))
       {
         UE_LOG(LogComfyTextures, Error, TEXT("Render request failed"));
         Data.State = EComfyTexturesRenderState::Failed;
@@ -1206,7 +1206,7 @@ void UComfyTexturesWidgetBase::ClearRenderQueue()
   }
 
   TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
-  Payload->SetBoolField("clear", true);
+  Payload->SetBoolField(TEXT("clear"), true);
 
   HttpClient->DoHttpPostRequest("queue", Payload, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
@@ -1233,8 +1233,8 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
   if (bUnloadModels)
   {
     Payload = MakeShared<FJsonObject>();
-    Payload->SetBoolField("free_memory", true);
-    Payload->SetBoolField("unload_models", true);
+    Payload->SetBoolField(TEXT("free_memory"), true);
+    Payload->SetBoolField(TEXT("unload_models"), true);
 
     HttpClient->DoHttpPostRequest("free", Payload, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
       {
@@ -1249,7 +1249,7 @@ void UComfyTexturesWidgetBase::FreeComfyMemory(bool bUnloadModels)
   }
 
   Payload = MakeShared<FJsonObject>();
-  Payload->SetBoolField("clear", true);
+  Payload->SetBoolField(TEXT("clear"), true);
 
   HttpClient->DoHttpPostRequest("history", Payload, [this](const TSharedPtr<FJsonObject>& Response, bool bWasSuccessful)
     {
@@ -1455,7 +1455,7 @@ bool UComfyTexturesWidgetBase::ParseWorkflowJson(const FString& JsonPath, FComfy
 
 FString UComfyTexturesWidgetBase::GetWorkflowJsonPath(EComfyTexturesMode Mode) const
 {
-  FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
+  FString PluginFolderPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir()), TEXT("ComfyTextures"));
   FString JsonPath = FPaths::Combine(PluginFolderPath, TEXT("/Content/Workflows/"));
 
   if (Mode == EComfyTexturesMode::Create)
@@ -1554,7 +1554,7 @@ bool UComfyTexturesWidgetBase::LoadParams()
     Params.Add(Mode, Param);
   }
 
-  FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
+  FString PluginFolderPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir()), TEXT("ComfyTextures"));
   FString ConfigPath = FPaths::Combine(PluginFolderPath, TEXT("WidgetParams.json"));
 
   FString JsonString = "";
@@ -1574,36 +1574,36 @@ bool UComfyTexturesWidgetBase::LoadParams()
     return false;
   }
 
-  for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : ParamsObject->Values)
+  for (const auto& Pair : ParamsObject->Values)
   {
     TSharedPtr<FJsonObject> ParamObject = Pair.Value->AsObject();
 
     FComfyTexturesWorkflowParams Param;
-    ParamObject->TryGetStringField("positive_prompt", Param.PositivePrompt);
-    ParamObject->TryGetStringField("negative_prompt", Param.NegativePrompt);
-    ParamObject->TryGetNumberField("seed", Param.Seed);
-    ParamObject->TryGetNumberField("cfg", Param.Cfg);
-    ParamObject->TryGetNumberField("steps", Param.Steps);
-    ParamObject->TryGetNumberField("refiner_steps", Param.RefinerSteps);
-    ParamObject->TryGetNumberField("denoise_strength", Param.DenoiseStrength);
-    ParamObject->TryGetNumberField("control_depth_strength", Param.ControlDepthStrength);
-    ParamObject->TryGetNumberField("control_canny_strength", Param.ControlCannyStrength);
+    ParamObject->TryGetStringField(TEXT("positive_prompt"), Param.PositivePrompt);
+    ParamObject->TryGetStringField(TEXT("negative_prompt"), Param.NegativePrompt);
+    ParamObject->TryGetNumberField(TEXT("seed"), Param.Seed);
+    ParamObject->TryGetNumberField(TEXT("cfg"), Param.Cfg);
+    ParamObject->TryGetNumberField(TEXT("steps"), Param.Steps);
+    ParamObject->TryGetNumberField(TEXT("refiner_steps"), Param.RefinerSteps);
+    ParamObject->TryGetNumberField(TEXT("denoise_strength"), Param.DenoiseStrength);
+    ParamObject->TryGetNumberField(TEXT("control_depth_strength"), Param.ControlDepthStrength);
+    ParamObject->TryGetNumberField(TEXT("control_canny_strength"), Param.ControlCannyStrength);
 
     float editMaskMode = 0.0f;
-    if (ParamObject->TryGetNumberField("edit_mask_mode", editMaskMode))
+    if (ParamObject->TryGetNumberField(TEXT("edit_mask_mode"), editMaskMode))
     {
       Param.EditMaskMode = (EComfyTexturesEditMaskMode)editMaskMode;
     }
 
-    if (Pair.Key == "create")
+    if (Pair.Key == TEXT("create"))
     {
       Params.Add(EComfyTexturesMode::Create, Param);
     }
-    else if (Pair.Key == "edit")
+    else if (Pair.Key == TEXT("edit"))
     {
       Params.Add(EComfyTexturesMode::Edit, Param);
     }
-    else if (Pair.Key == "refine")
+    else if (Pair.Key == TEXT("refine"))
     {
       Params.Add(EComfyTexturesMode::Refine, Param);
     }
@@ -1618,7 +1618,7 @@ bool UComfyTexturesWidgetBase::LoadParams()
 
 bool UComfyTexturesWidgetBase::SaveParams()
 {
-  FString PluginFolderPath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("ComfyTextures"));
+  FString PluginFolderPath = FPaths::Combine(FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir()), TEXT("ComfyTextures"));
   FString ConfigPath = FPaths::Combine(PluginFolderPath, TEXT("WidgetParams.json"));
 
   TSharedPtr<FJsonObject> ParamsObject = MakeShared<FJsonObject>();
@@ -1627,16 +1627,16 @@ bool UComfyTexturesWidgetBase::SaveParams()
   {
     TSharedPtr<FJsonObject> ParamObject = MakeShared<FJsonObject>();
 
-    ParamObject->SetStringField("positive_prompt", Pair.Value.PositivePrompt);
-    ParamObject->SetStringField("negative_prompt", Pair.Value.NegativePrompt);
-    ParamObject->SetNumberField("seed", Pair.Value.Seed);
-    ParamObject->SetNumberField("cfg", Pair.Value.Cfg);
-    ParamObject->SetNumberField("steps", Pair.Value.Steps);
-    ParamObject->SetNumberField("refiner_steps", Pair.Value.RefinerSteps);
-    ParamObject->SetNumberField("denoise_strength", Pair.Value.DenoiseStrength);
-    ParamObject->SetNumberField("control_depth_strength", Pair.Value.ControlDepthStrength);
-    ParamObject->SetNumberField("control_canny_strength", Pair.Value.ControlCannyStrength);
-    ParamObject->SetNumberField("edit_mask_mode", (float)Pair.Value.EditMaskMode);
+    ParamObject->SetStringField(TEXT("positive_prompt"), Pair.Value.PositivePrompt);
+    ParamObject->SetStringField(TEXT("negative_prompt"), Pair.Value.NegativePrompt);
+    ParamObject->SetNumberField(TEXT("seed"), Pair.Value.Seed);
+    ParamObject->SetNumberField(TEXT("cfg"), Pair.Value.Cfg);
+    ParamObject->SetNumberField(TEXT("steps"), Pair.Value.Steps);
+    ParamObject->SetNumberField(TEXT("refiner_steps"), Pair.Value.RefinerSteps);
+    ParamObject->SetNumberField(TEXT("denoise_strength"), Pair.Value.DenoiseStrength);
+    ParamObject->SetNumberField(TEXT("control_depth_strength"), Pair.Value.ControlDepthStrength);
+    ParamObject->SetNumberField(TEXT("control_canny_strength"), Pair.Value.ControlCannyStrength);
+    ParamObject->SetNumberField(TEXT("edit_mask_mode"), (float)Pair.Value.EditMaskMode);
 
     FString ModeString = "";
     if (Pair.Key == EComfyTexturesMode::Create)
@@ -1711,21 +1711,21 @@ FString UComfyTexturesWidgetBase::GetBaseUrl() const
 void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObject>& Message)
 {
   FString MessageType;
-  if (!Message->TryGetStringField("type", MessageType))
+  if (!Message->TryGetStringField(TEXT("type"), MessageType))
   {
     UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing type field"));
     return;
   }
 
   const TSharedPtr<FJsonObject>* MessageData;
-  if (!Message->TryGetObjectField("data", MessageData))
+  if (!Message->TryGetObjectField(TEXT("data"), MessageData))
   {
     UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing data field"));
     return;
   }
 
   FString PromptId;
-  if (!(*MessageData)->TryGetStringField("prompt_id", PromptId))
+  if (!(*MessageData)->TryGetStringField(TEXT("prompt_id"), PromptId))
   {
     UE_LOG(LogComfyTextures, Verbose, TEXT("Websocket message missing prompt_id field"));
     return;
@@ -1757,7 +1757,7 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
   {
     int CurrentNodeIndex;
 
-    if (!(*MessageData)->TryGetNumberField("node", CurrentNodeIndex))
+    if (!(*MessageData)->TryGetNumberField(TEXT("node"), CurrentNodeIndex))
     {
       Data.State = EComfyTexturesRenderState::Finished;
       Data.Progress = 1.0f;
@@ -1772,14 +1772,14 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
   else if (MessageType == "progress")
   {
     float Value;
-    if (!(*MessageData)->TryGetNumberField("value", Value))
+    if (!(*MessageData)->TryGetNumberField(TEXT("value"), Value))
     {
       UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing value field"));
       return;
     }
 
     float Max;
-    if (!(*MessageData)->TryGetNumberField("max", Max))
+    if (!(*MessageData)->TryGetNumberField(TEXT("max"), Max))
     {
       UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing max field"));
       return;
@@ -1791,7 +1791,7 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
   else if (MessageType == "executed")
   {
     const TSharedPtr<FJsonObject>* OutputData;
-    if (!(*MessageData)->TryGetObjectField("output", OutputData))
+    if (!(*MessageData)->TryGetObjectField(TEXT("output"), OutputData))
     {
       UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing output field"));
       return;
@@ -1800,7 +1800,7 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
     // "output": {"images": [{"filename": "ComfyUI_00062_.png", "subfolder": "", "type": "output"}]}, "prompt_id": "30840158-3b72-4c3e-9112-7efea0a3a2a8"}
     const TArray<TSharedPtr<FJsonValue>>* Images;
 
-    if (!(*OutputData)->TryGetArrayField("images", Images))
+    if (!(*OutputData)->TryGetArrayField(TEXT("images"), Images))
     {
       UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing images field"));
       return;
@@ -1816,21 +1816,21 @@ void UComfyTexturesWidgetBase::HandleWebSocketMessage(const TSharedPtr<FJsonObje
       }
 
       FString Filename;
-      if (!(*ImageObject)->TryGetStringField("filename", Filename))
+      if (!(*ImageObject)->TryGetStringField(TEXT("filename"), Filename))
       {
         UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing filename field"));
         return;
       }
 
       FString Subfolder;
-      if (!(*ImageObject)->TryGetStringField("subfolder", Subfolder))
+      if (!(*ImageObject)->TryGetStringField(TEXT("subfolder"), Subfolder))
       {
         UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing subfolder field"));
         return;
       }
 
       FString Type;
-      if (!(*ImageObject)->TryGetStringField("type", Type))
+      if (!(*ImageObject)->TryGetStringField(TEXT("type"), Type))
       {
         UE_LOG(LogComfyTextures, Warning, TEXT("Websocket message missing type field"));
         return;
@@ -2021,7 +2021,7 @@ bool UComfyTexturesWidgetBase::UploadImages(const TArray<FComfyTexturesImageData
             else
             {
               FString ResultFileName;
-              if (Response->TryGetStringField("name", ResultFileName))
+              if (Response->TryGetStringField(TEXT("name"), ResultFileName))
               {
                 StateData->ResultFileNames[Index] = ResultFileName;
               }

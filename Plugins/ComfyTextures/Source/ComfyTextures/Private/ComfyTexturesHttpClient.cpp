@@ -148,7 +148,7 @@ bool ComfyTexturesHttpClient::DoHttpGetRequest(const FString& Url, TFunction<voi
         else
         {
           ResponseJson = MakeShareable(new FJsonObject());
-          ResponseJson->SetStringField("response", ResponseString);
+          ResponseJson->SetStringField(TEXT("response"), ResponseString);
         }
 
         Callback(MoveTemp(ResponseJson), true);
@@ -221,7 +221,7 @@ bool ComfyTexturesHttpClient::DoHttpPostRequest(const FString& Url, const TShare
         else
         {
           ResponseJson = MakeShareable(new FJsonObject());
-          ResponseJson->SetStringField("response", ResponseString);
+          ResponseJson->SetStringField(TEXT("response"), ResponseString);
         }
 
         Callback(MoveTemp(ResponseJson), true);
@@ -299,7 +299,7 @@ bool ComfyTexturesHttpClient::DoHttpFileUpload(const FString& Url, const TArray6
         else
         {
           ResponseJson = MakeShareable(new FJsonObject());
-          ResponseJson->SetStringField("response", ResponseString);
+          ResponseJson->SetStringField(TEXT("response"), ResponseString);
         }
 
         Callback(MoveTemp(ResponseJson), true);
